@@ -807,7 +807,7 @@ Item {
                 property real lv: 0.4
                 height: Math.max(4, eq.h * lv)
                 SequentialAnimation on lv {
-                    running: eq.go && !Look.lite; loops: Animation.Infinite
+                    running: eq.go && eq.visible && !Look.lite; loops: Animation.Infinite
                     NumberAnimation { to: 1.0; duration: 260 + index * 70; easing.type: Easing.InOutSine }
                     NumberAnimation { to: 0.3 + (index % 2) * 0.15; duration: 300 + index * 50; easing.type: Easing.InOutSine }
                     NumberAnimation { to: 0.75; duration: 220 + index * 90; easing.type: Easing.InOutSine }
