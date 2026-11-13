@@ -125,12 +125,12 @@ Item {
             }
         }
 
-        // SUPER + ALT + mouse: rice-canvasd reads the mouse and the keyboard directly
         Rectangle {
             id: cv
             readonly property var dv: page.st.devices || null
-            readonly property bool denied: !!dv && dv.denied > 0 && (dv.keyboards === 0 || dv.mice === 0)
-            readonly property bool ready: page.st.daemon === true && !!dv && dv.keyboards > 0 && dv.mice > 0
+            readonly property bool hasPointer: !!dv && ((dv.mice || 0) > 0 || (dv.pads || 0) > 0)
+            readonly property bool denied: !!dv && dv.denied > 0 && (dv.keyboards === 0 || !cv.hasPointer)
+            readonly property bool ready: page.st.daemon === true && !!dv && dv.keyboards > 0 && cv.hasPointer
             visible: page.niri || page.st.hypr !== false
             width: parent.width; height: Math.max(72, ic.implicitHeight + 28); radius: M3.rL
             color: ready ? M3.surfaceC : M3.alpha(M3.primary, 0.10)
@@ -145,15 +145,15 @@ Item {
                 width: parent.width - 66 - (allowBtn.visible ? allowBtn.width + 32 : 20)
                 spacing: 3
                 T { font.pixelSize: 14; font.weight: Font.DemiBold; width: parent.width; elide: Text.ElideRight
-                    text: cv.ready ? page.nice(page.kv("mod_hold", "SUPER + ALT")) + " + " + I18n.t("mouse is ready")
-                        : (cv.denied ? (page.st.group ? I18n.t("Log out and back in once") : I18n.t("One step for SUPER + ALT + mouse"))
-                        : (page.st.daemon ? I18n.t("No keyboard or mouse found yet") : I18n.t("SUPER + ALT + mouse is not running"))) }
+                    text: cv.ready ? page.nice(page.kv("mod_hold", "SUPER + ALT")) + " + " + I18n.t("mouse / touchpad is ready")
+                        : (cv.denied ? (page.st.group ? I18n.t("Log out and back in once") : I18n.t("One step for SUPER + ALT + mouse / touchpad"))
+                        : (page.st.daemon ? I18n.t("No keyboard, mouse or touchpad found yet") : I18n.t("SUPER + ALT + mouse is not running"))) }
                 T { width: parent.width; wrapMode: Text.WordWrap; font.pixelSize: 12; color: M3.inkDim
-                    text: cv.ready ? (cv.dv.keyboards + " " + I18n.t("keyboard(s)") + " · " + cv.dv.mice + " " + I18n.t("mouse / mice"))
+                    text: cv.ready ? (cv.dv.keyboards + " " + I18n.t("keyboard(s)") + " · " + (cv.dv.pads > 0 && cv.dv.mice > cv.dv.pads ? (cv.dv.mice - cv.dv.pads) + " " + I18n.t("mouse / mice") + " · " + cv.dv.pads + " " + I18n.t("touchpad(s)") : (cv.dv.pads > 0 ? cv.dv.pads + " " + I18n.t("touchpad(s)") : cv.dv.mice + " " + I18n.t("mouse / mice"))))
                         : (cv.denied ? (page.st.group ? I18n.t("You are in the input group now; it counts after the next login.")
                               : (page.st.nixos ? I18n.t("NixOS: add \"input\" to your user's extraGroups in configuration.nix, run sudo nixos-rebuild switch, then log in again. Allow shows the line.")
-                                  : I18n.t("Your user joins the input group (your password, once), then log in again. Programs you run can then read the keyboard and the mouse too.")))
-                        : (page.st.daemon ? I18n.t("Plug in a mouse, or check with: rice-infinite check") : I18n.t("It starts with Hyprland. Start it now:"))) }
+                                  : I18n.t("Your user joins the input group (your password, once), then log in again. Programs you run can then read the keyboard, mouse and touchpad too.")))
+                        : (page.st.daemon ? I18n.t("Plug in a mouse or use a touchpad, or check with: rice-infinite check") : I18n.t("It starts with Hyprland. Start it now:"))) }
             }
             Btn {
                 id: allowBtn
@@ -189,13 +189,15 @@ Item {
                 id: keys
                 width: parent.width
                 Key { keys: page.nice(page.kv("key_toggle", "SUPER + F")); what: I18n.t("Infinite Desktop on / off") }
-                Key { keys: page.nice(page.kv("mod_hold", "SUPER + ALT")); what: I18n.t("Hold and move the mouse: the whole canvas moves with it") }
+                Key { keys: page.nice(page.kv("mod_hold", "SUPER + ALT")); what: I18n.t("Hold and move mouse or touchpad: canvas moves") }
                 Key { keys: page.nice(page.kv("mod_hold", "SUPER + ALT")) + " + Arrows"; what: I18n.t("Move the canvas") }
                 Key { keys: page.nice(page.kv("mod_go", "SUPER + CTRL")) + " + Arrows"; what: I18n.t("Go to the next window that way (the canvas glides to it)") }
                 Key { visible: !page.niri; keys: page.nice(page.kv("mod_zoom", "CTRL")) + " + Mouse wheel"; what: I18n.t("Zoom out (down) and in (up) around the pointer") }
-                Key { visible: !page.niri; keys: "Super + Mouse wheel"; what: I18n.t("Move the canvas up and down") }
-                Key { visible: !page.niri; keys: "Super + Shift + Mouse wheel"; what: I18n.t("Move the canvas left and right") }
-                Key { visible: !page.niri && page.st.push === 1; keys: "Super + Left mouse"; what: I18n.t("Drag a window to the edge of the screen and keep going: the others come to it") }
+                Key { visible: !page.niri; keys: "Pinch (touchpad)"; what: I18n.t("Pinch out (in) and in (out) to zoom") }
+                Key { visible: !page.niri; keys: "Super + Mouse wheel / 2-finger scroll"; what: I18n.t("Move the canvas up and down") }
+                Key { visible: !page.niri; keys: "Super + 2-finger horizontal scroll"; what: I18n.t("Move the canvas left and right") }
+                Key { visible: !page.niri; keys: "Super + 3-finger swipe"; what: I18n.t("Go to the next window that way") }
+                Key { visible: !page.niri && page.st.push === 1; keys: "Super + Left mouse / tap drag"; what: I18n.t("Drag a window to the edge of the screen and keep going: the others come to it") }
                 Key { visible: !page.niri; keys: page.nice(page.kv("mod_hold", "SUPER + ALT")) + " + 0"; what: I18n.t("Back to 100 %") }
             }
         }

@@ -1,0 +1,202 @@
+#!/usr/bin/env python3
+import json
+import os
+import re
+import subprocess
+import sys
+
+CONF = os.path.expanduser("~/.config/rice/gestures.json")
+LUA_CONF = os.path.expanduser("~/.config/hypr/rice-gestures.lua")
+
+DEFAULTS = {
+    "swipe_3_workspace": True,
+    "swipe_3_up": "taskview",
+    "swipe_3_down": "close",
+    "pinch_3": True,
+    "swipe_4_up": "dashboard",
+    "swipe_4_down": "cc",
+    "swipe_4_horizontal": "switch",
+    "pinch_4": True,
+}
+
+
+def load_cfg():
+    cfg = dict(DEFAULTS)
+    try:
+        cfg.update(json.load(open(CONF)))
+    except Exception:
+        pass
+    return cfg
+
+
+def save_cfg(cfg):
+    try:
+        os.makedirs(os.path.dirname(CONF), exist_ok=True)
+        json.dump(cfg, open(CONF, "w"), indent=2)
+    except OSError:
+        pass
+
+
+def detect_touchpad():
+    try:
+        blocks = open("/proc/bus/input/devices").read().split("\n\n")
+        for b in blocks:
+            n = re.search(r'^N: Name="(.*)"$', b, re.M)
+            name = n.group(1) if n else ""
+            k = re.search(r"^B: KEY=(.*)$", b, re.M)
+            a = re.search(r"^B: ABS=(.*)$", b, re.M)
+            if any(w in name.lower() for w in ("touchpad", "trackpad")) or (k and a and ("325" in b or "330" in b)):
+                return True, name
+    except OSError:
+        pass
+    return False, ""
+
+
+def get_hypr_option(opt):
+    try:
+        out = subprocess.run(["hyprctl", "getoption", opt], capture_output=True, text=True, timeout=1).stdout
+        for line in out.splitlines():
+            line = line.strip()
+            if line.startswith("bool:"):
+                return "true" in line
+            if line.startswith("float:"):
+                return float(line.split()[1])
+            if line.startswith("int:"):
+                return int(line.split()[1])
+    except Exception:
+        pass
+    return None
+
+
+def generate_lua(cfg):
+    lines = [
+        'local home = os.getenv("HOME") or ""',
+        'local bin = home .. "/.local/bin/"',
+        '',
+        'local function run(cmd)',
+        '    hl.dispatch(hl.dsp.exec_cmd(cmd))',
+        'end',
+        '',
+    ]
+    if cfg.get("swipe_3_workspace", True):
+        lines.append('hl.gesture({ fingers = 3, direction = "horizontal", action = "workspace" })')
+    up3 = cfg.get("swipe_3_up", "taskview")
+    if up3 == "taskview":
+        lines.append('hl.gesture({ fingers = 3, direction = "up", action = function() run(bin .. "rice-taskview overview") end })')
+    elif up3 == "fullscreen":
+        lines.append('hl.gesture({ fingers = 3, direction = "up", action = "fullscreen" })')
+
+    down3 = cfg.get("swipe_3_down", "close")
+    if down3 == "close":
+        lines.append('hl.gesture({ fingers = 3, direction = "down", action = "close" })')
+    elif down3 == "magic":
+        lines.append('hl.gesture({ fingers = 3, direction = "down", action = function() hl.dispatch(hl.dsp.workspace.toggle_special("magic")) end })')
+
+    if cfg.get("pinch_3", True):
+        lines.append('hl.gesture({ fingers = 3, direction = "pinchout", action = "fullscreen" })')
+        lines.append('hl.gesture({ fingers = 3, direction = "pinchin", action = function() hl.dispatch(hl.dsp.window.float({ action = "toggle" })) end })')
+
+    up4 = cfg.get("swipe_4_up", "dashboard")
+    if up4 == "dashboard":
+        lines.append('hl.gesture({ fingers = 4, direction = "up", action = function() run(bin .. "rice-dashboard open") end })')
+    elif up4 == "launcher":
+        lines.append('hl.gesture({ fingers = 4, direction = "up", action = function() run(bin .. "rice-launch") end })')
+
+    down4 = cfg.get("swipe_4_down", "cc")
+    if down4 == "cc":
+        lines.append('hl.gesture({ fingers = 4, direction = "down", action = function() run(bin .. "rice-cc") end })')
+
+    if cfg.get("swipe_4_horizontal", "switch") == "switch":
+        lines.append('hl.gesture({ fingers = 4, direction = "left", action = function() run(bin .. "rice-taskview switch") end })')
+        lines.append('hl.gesture({ fingers = 4, direction = "right", action = function() run(bin .. "rice-taskview back") end })')
+
+    if cfg.get("pinch_4", True):
+        lines.append('hl.gesture({ fingers = 4, direction = "pinchin", action = function() run(bin .. "rice-lock") end })')
+        lines.append('hl.gesture({ fingers = 4, direction = "pinchout", action = function() hl.dispatch(hl.dsp.workspace.toggle_special("magic")) end })')
+
+    lines.append('hl.gesture({ fingers = 3, direction = "up", mods = "SUPER", action = function() hl.dispatch(hl.dsp.window.float({ action = "toggle" })) end })')
+    lines.append('hl.gesture({ fingers = 3, direction = "down", mods = "SUPER", action = function() hl.dispatch(hl.dsp.workspace.toggle_special("magic")) end })')
+    lines.append('hl.gesture({ fingers = 3, direction = "left", mods = "SUPER", action = function() hl.dispatch(hl.dsp.focus({ workspace = "e-1" })) end })')
+    lines.append('hl.gesture({ fingers = 3, direction = "right", mods = "SUPER", action = function() hl.dispatch(hl.dsp.focus({ workspace = "e+1" })) end })')
+    lines.append("")
+    return "\n".join(lines)
+
+
+def apply_lua():
+    cfg = load_cfg()
+    code = generate_lua(cfg)
+    try:
+        os.makedirs(os.path.dirname(LUA_CONF), exist_ok=True)
+        open(LUA_CONF, "w").write(code)
+        repo_lua = os.path.expanduser("~/shadows-shell/lua/rice-gestures.lua")
+        if os.path.isdir(os.path.dirname(repo_lua)):
+            open(repo_lua, "w").write(code)
+    except OSError:
+        pass
+    if os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
+        subprocess.run(["hyprctl", "reload"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def cmd_state():
+    cfg = load_cfg()
+    found, name = detect_touchpad()
+    res = dict(cfg)
+    res["hypr"] = bool(os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"))
+    res["padFound"] = found
+    res["padName"] = name
+    nat = get_hypr_option("input:touchpad:natural_scroll")
+    tap = get_hypr_option("input:touchpad:tap-to-click")
+    sens = get_hypr_option("input:sensitivity")
+    sc = get_hypr_option("input:touchpad:scroll_factor")
+    res["natural_scroll"] = nat if nat is not None else False
+    res["tap_to_click"] = tap if tap is not None else True
+    res["sensitivity"] = sens if sens is not None else 0.0
+    res["scroll_factor"] = sc if sc is not None else 1.0
+    print(json.dumps(res))
+
+
+def cmd_set(k, v):
+    bin_dir = os.path.dirname(os.path.abspath(__file__))
+    hypr_set = os.path.join(bin_dir, "hypr-set")
+    if k == "natural_scroll":
+        b = "true" if v in (True, "true", "1", 1, "on") else "false"
+        subprocess.run([hypr_set, "set", "input.touchpad.natural_scroll", b], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return
+    if k == "tap_to_click":
+        b = "true" if v in (True, "true", "1", 1, "on") else "false"
+        subprocess.run([hypr_set, "set", "input.touchpad.tap-to-click", b], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return
+    if k == "scroll_factor":
+        subprocess.run([hypr_set, "set", "input.touchpad.scroll_factor", str(float(v))], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return
+    if k == "sensitivity":
+        subprocess.run([hypr_set, "set", "input.sensitivity", str(float(v))], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return
+    cfg = load_cfg()
+    if v in ("true", "on", "1"):
+        cfg[k] = True
+    elif v in ("false", "off", "0"):
+        cfg[k] = False
+    else:
+        cfg[k] = v
+    save_cfg(cfg)
+    apply_lua()
+
+
+def main():
+    if len(sys.argv) < 2:
+        cmd_state()
+        return
+    cmd = sys.argv[1]
+    if cmd == "state":
+        cmd_state()
+    elif cmd == "apply":
+        apply_lua()
+    elif cmd == "set" and len(sys.argv) >= 4:
+        cmd_set(sys.argv[2], sys.argv[3])
+    else:
+        cmd_state()
+
+
+if __name__ == "__main__":
+    main()
