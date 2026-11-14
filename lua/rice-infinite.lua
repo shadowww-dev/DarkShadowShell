@@ -271,6 +271,9 @@ end
 -- a window that opened on the canvas: float it, give it its own room next to the last one, glide there
 function RI.opened(w)
     if not (RI.on and w and w.workspace and w.workspace.id == RI.ws) then return end
+    -- Hyprland gives Lua window.open after deciding focus. Passive floating windows are app overlays (Steam toasts,
+    -- notification pop-ups); moving, resizing or focusing them would move the canvas instead of leaving the overlay put.
+    if w.floating and not w.active then return end
     if not w.floating then
         -- it would have been tiled: it tiles again when Infinite Desktop is turned off
         RI.tiled[w.address] = true
