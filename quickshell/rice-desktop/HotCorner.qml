@@ -10,9 +10,6 @@ PanelWindow {
     property var cfg: ({ enabled: false })
     property var st: ({})
     property bool open: false
-    property string cfgText: ""
-    property string lastOpenCmd: ""
-    property bool cmdSeen: false
     // after it closes while the pointer is still in the corner, wait until the pointer leaves the corner
     property bool armed: true
     property real t: 0
@@ -112,27 +109,19 @@ PanelWindow {
         }
     }
 
-    // ---- settings + "open now" requests
-    Process {
-        id: cfgProc
-        command: ["bash", "-c", "cat \"$HOME/.config/rice/hotcorner.json\" 2>/dev/null || \"$HOME/.local/bin/rice-hotcorner\" config; echo; echo '@@'; cat \"$HOME/.cache/rice/hotcorner-open\" 2>/dev/null; echo '@@'; [ -e \"$HOME/.cache/rice/flat\" ] && echo flat"]
-        stdout: StdioCollector {
-            onStreamFinished: {
-                const p = text.split("@@")
-                const c = p[0].trim()
-                // blur & transparency off (rice-effects: Lite or gaming mode): a solid panel
-                const fl = p.length > 2 && p[2].trim() === "flat"
-                if (c.length > 0 && c + fl !== hc.cfgText) {
-                    try { const j = JSON.parse(c); if (fl) { j.transparency = false; j.blur = false } hc.cfg = j; hc.cfgText = c + fl } catch (e) { }
-                }
-                const o = p.length > 1 ? p[1].trim() : ""
-                if (hc.cmdSeen && o.length > 0 && o !== hc.lastOpenCmd) hc.open = true
-                hc.lastOpenCmd = o
-                hc.cmdSeen = true
-            }
-        }
+    // ---- settings + "open now" requests (both watched: no bash started four times a second for them)
+    function applyCfg(t) {
+        try {
+            const j = JSON.parse(t)
+            if (!j || typeof j !== "object") return
+            // blur & transparency off (rice-effects: Lite or gaming mode): a solid panel
+            if (Look.flat) { j.transparency = false; j.blur = false }
+            hc.cfg = j
+        } catch (e) { }
     }
-    Timer { interval: 400; running: true; repeat: true; triggeredOnStart: true; onTriggered: if (!cfgProc.running) cfgProc.running = true }
+    Trigger { path: Quickshell.env("HOME") + "/.config/rice/hotcorner.json"; every: 5000
+              onContent: function(t) { hc.applyCfg(t) } }
+    Trigger { name: "hotcorner-open"; onFired: function() { hc.open = true } }
 
     // ---- live status while open
     Process {

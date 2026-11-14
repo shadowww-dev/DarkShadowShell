@@ -73,7 +73,8 @@ FocusScope {
         command: ["bash", "-c", "exec \"$HOME/.local/bin/rice-dashboard\" stats"]
         stdout: SplitParser { onRead: function(l) { try { lv.st = JSON.parse(l) } catch (e) { } } }
     }
-    Player { id: pl; running: lv.v("media", true) !== false }
+    // this screen has its own file Player (no singleton here): it ticks for the first screen, when music is shown
+    Player { id: pl; running: lv.v("media", true) !== false && lv.first }
 
     // ---------- the background ----------
     readonly property string bgKind: v("background", "screenshot")

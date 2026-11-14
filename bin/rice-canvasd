@@ -449,7 +449,8 @@ def main():
             except (OSError, ValueError):
                 r = []
         else:
-            time.sleep(0.5)
+            # no /dev/input (not in the input group): niri still needs the canvas to follow the keys often
+            time.sleep(0.05 if NIRI else 0.5)
         for fd in r:
             try:
                 data = os.read(fd, EV.size * 64)

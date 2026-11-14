@@ -11,6 +11,7 @@
                             ~/.cache/rice/update-live.log, the state to ~/.cache/rice/update-live.json
 """
 import fcntl
+import fcntl
 import json
 import os
 import shutil
@@ -240,12 +241,19 @@ def put_live(**kw):
 def gui(args):
     """the update without a terminal: install.sh --update --yes --no-packages, detached from Settings (the update
     puts new Settings files in place, so Settings reloads in the middle; this keeps running and Settings reads on)"""
+    os.makedirs(CACHE, exist_ok=True)
+    # two clicks (Settings and the Update Center at once) started two installers: one at a time
+    lk = open(CACHE + "/update.lock", "w")
+    try:
+        fcntl.flock(lk, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        print("already updating")
+        return 0
     st = live()
     if st.get("state") == "running" and alive(st.get("pid")):
         print("already updating")
         return 0
     r = repo()
-    os.makedirs(CACHE, exist_ok=True)
     if not r:
         open(LIVE_LOG, "w").write("    \u2718 Could not find your copy of the repo (~/shadows-shell). Clone it again:\n"
                                   "      git clone https://github.com/shadowww-dev/DarkShadowShell ~/shadows-shell\n")

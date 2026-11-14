@@ -187,10 +187,13 @@ def save(c):
 
 
 # ---------------- helpers ----------------
-def alive(pidfile):
+def alive(pidfile, want=""):
     try:
         pid = int(open(pidfile).read().strip())
         os.kill(pid, 0)
+        # the process ended, the number was given to something else: never signal that
+        if want and want not in open("/proc/%d/cmdline" % pid).read():
+            return 0
         return pid
     except Exception:
         return 0
@@ -264,7 +267,7 @@ def recordings():
 
 def state():
     rec = {}
-    if alive(REC_PID):
+    if alive(REC_PID, "recorder"):
         try:
             rec = json.load(open(REC_INFO))
         except Exception:
@@ -282,7 +285,7 @@ def state():
             pass
     out = {
         "schemes": schemes, "scheme": scheme,
-        "awake": bool(alive(AWAKE_PID)), "recording": bool(rec), "rec_start": rec.get("start", 0),
+        "awake": bool(alive(AWAKE_PID, "rice-sys")), "recording": bool(rec), "rec_start": rec.get("start", 0),
         "wifi": wifi_on(), "bluetooth": bt_on(), "dnd": dnd_on(), "gaming": gaming_on(), "mic_muted": mic_muted(),
         "recordings": recordings(), "rec_dir": REC_DIR, "walls": wl[0], "wall": wl[1], "shot_dir": SHOT_DIR, "accent": accent(), "tools": tools,
         "now": time.time(),
@@ -328,7 +331,7 @@ def apply_blur(c):
 
 
 def toggle_awake():
-    pid = alive(AWAKE_PID)
+    pid = alive(AWAKE_PID, "rice-sys")
     if pid:
         os.kill(pid, signal.SIGTERM)
         os.remove(AWAKE_PID)
@@ -439,7 +442,7 @@ def rec_duration(path):
 
 
 def rec_info():
-    pid = alive(REC_PID)
+    pid = alive(REC_PID, "recorder")
     start = 0
     if pid:
         try:
@@ -462,13 +465,13 @@ def rec_info():
 
 def record(mode):
     c = load()
-    pid = alive(REC_PID)
+    pid = alive(REC_PID, "recorder")
     if mode == "stop" or pid:
         if pid:
             os.kill(pid, signal.SIGINT)
             for _ in range(50):
                 time.sleep(0.1)
-                if not alive(REC_PID):
+                if not alive(REC_PID, "recorder"):
                     break
             try:
                 f = json.load(open(REC_INFO)).get("file", "")

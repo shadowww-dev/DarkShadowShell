@@ -49,7 +49,8 @@ PanelWindow {
     property bool recording: false
     property real recStart: 0
     property var now: new Date()
-    property var st: ({ cpu: 0, ram: 0, gpu: 0, temp: 0, ramu: 0, ramt: 0 })
+    // one rice-stats for the whole shell (Stats.qml)
+    readonly property var st: Stats.st
     readonly property var sink: Pipewire.defaultAudioSink
     readonly property var source: Pipewire.defaultAudioSource
     PwObjectTracker { objects: [cc.sink, cc.source] }
@@ -81,11 +82,6 @@ PanelWindow {
                 })
             }
         }
-    }
-    Process {
-        command: [Quickshell.env("HOME") + "/.local/bin/rice-stats", "2"]
-        running: cc.open && cc.tab === "overview"
-        stdout: SplitParser { onRead: function(l) { try { cc.st = JSON.parse(l) } catch (e) { } } }
     }
     Trigger {
         path: Quickshell.env("HOME") + "/.cache/rice/record.json"
@@ -377,7 +373,9 @@ PanelWindow {
                     width: parent.width; height: 176; radius: 28; color: cc.card
                     visible: mp.has
                     opacity: cc.stg(5); transform: Translate { y: (1 - cc.stg(5)) * 22 }
-                    Player { id: mp; running: cc.open && cc.tab === "control" }
+                    // the one Player ticks while this card is out
+                    Instantiator { model: cc.open && cc.tab === "control" ? 1 : 0
+                                   delegate: QtObject { Component.onCompleted: Player.hold(); Component.onDestruction: Player.release() } }
                     Item {
                         id: art
                         x: 12; anchors.verticalCenter: parent.verticalCenter

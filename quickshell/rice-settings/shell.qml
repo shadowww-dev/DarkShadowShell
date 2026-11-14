@@ -937,6 +937,7 @@ FloatingWindow {
             PageSlot { nav: win; idx: 10; cur: win.page; page: Component { NotificationsPage { anchors.fill: parent; ctl: win } } }
             PageSlot { nav: win; idx: 11; cur: win.page; page: Component { IdlePage { anchors.fill: parent; ctl: win } } }
             PageSlot { nav: win; idx: 12; cur: win.page; page: Component { DesktopPage { anchors.fill: parent; ctl: win } } }
+            PageSlot { nav: win; idx: 13; cur: win.page; page: Component { HotCornersPage { anchors.fill: parent; ctl: win } } }
             PageSlot { nav: win; idx: 14; cur: win.page; page: Component { InterfacePage { anchors.fill: parent; ctl: win } } }
             PageSlot { nav: win; idx: 15; cur: win.page; page: Component { ServicesPage { anchors.fill: parent; ctl: win } } }
             PageSlot { nav: win; idx: 16; cur: win.page; page: Component { GamingPage { anchors.fill: parent; ctl: win } } }
@@ -955,6 +956,7 @@ FloatingWindow {
             PageSlot { nav: win; idx: 29; cur: win.page; page: Component { LookFeelPage { anchors.fill: parent; ctl: win } } }
             PageSlot { nav: win; idx: 30; cur: win.page; page: Component { KeybindsPage { anchors.fill: parent; ctl: win } } }
             PageSlot { nav: win; idx: 31; cur: win.page; page: Component { LanguagesPage { anchors.fill: parent; ctl: win } } }
+            PageSlot { nav: win; idx: 32; cur: win.page; page: Component { SecurityPage { anchors.fill: parent; ctl: win } } }
             PageSlot { nav: win; idx: 33; cur: win.page; page: Component { InfinitePage { anchors.fill: parent; ctl: win } } }
             PageSlot { nav: win; idx: 34; cur: win.page; page: Component { ThemesPage { anchors.fill: parent; ctl: win } } }
             PageSlot { nav: win; idx: 35; cur: win.page; page: Component { UpdatePage { anchors.fill: parent; ctl: win } } }

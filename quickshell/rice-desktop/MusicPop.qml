@@ -18,7 +18,7 @@ Item {
     width: 380
     implicitHeight: 360
 
-    Player { id: pl; running: mp.on }
+    Instantiator { model: mp.on ? 1 : 0; delegate: QtObject { Component.onCompleted: Player.hold(); Component.onDestruction: Player.release() } }
 
     // one after another: each part gets its own moment while the card opens
     property real e: 0

@@ -201,13 +201,17 @@ ShellRoot {
         }
     }
 
+    // the wallpaper comes from the file the wallpaper tools write (inotify: instantly, no process); the awww
+    // query is only a safety net for a wallpaper set by something other than this shell
+    Trigger { path: root.home + "/.cache/hyprquickpaper-current"; every: 30000
+        onContent: function(t) { const w = t.trim(); if (w !== "" && w !== root.wallpaper) root.wallpaper = w } }
     Process {
         id: wpProc
         command: ["bash", "-c", "w=$(awww query 2>/dev/null | grep -o 'image: .*' | head -1 | sed 's/^image: //'); [ -z \"$w\" ] && w=$(cat \"$HOME/.cache/hyprquickpaper-current\" 2>/dev/null); echo \"$w\""]
         stdout: StdioCollector { onStreamFinished: root.wallpaper = text.trim() }
     }
     Timer {
-        interval: 6000
+        interval: 30000
         running: Look.adapt || Wm.niri || !!(root.placement !== "draggable" && root.cfg.clock && root.cfg.clock.enabled === true)
         repeat: true
         triggeredOnStart: true
@@ -597,6 +601,8 @@ ShellRoot {
     LazyPanel { name: "cc-open"; ControlCenter { nf: notifs } }
 
     Dock { dc: root.cfg.dock ? root.cfg.dock : ({}) }
+    // the corner panel (Settings > Hot corners): rice-hotcorner writes ~/.cache/rice/hotcorner-open
+    HotCorner { }
 
 
 }

@@ -110,6 +110,8 @@ PY
 # since then is kept as it is on an update: the new version lands next to it as FILE.rice-update and the summary
 # lists it. Before there was a list, the version the repo had before this update (git) tells if it was changed.
 SUMS="$HOME/.config/rice/installed.sums"
+# one line per file: appending on every update made this grow without end (and every check below slower)
+[ -f "$SUMS" ] && awk 'NF == 2 { s[$2] = $1 } END { for (k in s) print s[k] "  " k }' "$SUMS" >"$SUMS.tmp" && mv "$SUMS.tmp" "$SUMS"
 KEPTF="$HOME/.cache/rice/kept-edits"
 PREV_REV=""
 sum_of() { sha256sum 2>/dev/null | cut -c1-64; }
@@ -144,7 +146,7 @@ put() {
   if [ -e "$dst" ] || [ -L "$dst" ]; then
     rel="${dst#"$HOME"/}"
     mkdir -p "$BK/$(dirname "$rel")"
-    cp -aL "$dst" "$BK/$rel" 2>/dev/null || true
+    cp -aL "$dst" "$BK/$rel" 2>/dev/null || warn "could not back up ~/$rel (it is replaced anyway)"
     [ -L "$dst" ] && rm -f "$dst"
   fi
   mkdir -p "$(dirname "$dst")"
@@ -180,7 +182,7 @@ copy_tree() { # copy_tree SRC_DIR DST_DIR
     if user_edited "$f" "$d"; then rm -f "$d.rice-new"; keep_edit "$f" "$d"; continue; fi
     rel2="${d#"$HOME"/}"
     mkdir -p "$BK/$(dirname "$rel2")"
-    cp -aL "$d" "$BK/$rel2" 2>/dev/null || true
+    cp -aL "$d" "$BK/$rel2" 2>/dev/null || warn "could not back up ~/$rel2 (it is replaced anyway)"
     [ -L "$d" ] && rm -f "$d"
     staged+=("$d")
   done
@@ -193,7 +195,7 @@ copy_tree() { # copy_tree SRC_DIR DST_DIR
       if cmp -s "$d.rice-new" "$d"; then rm -f "$d.rice-new"; rec_sum "$d"
       elif user_edited "$src/shell.qml" "$d"; then rm -f "$d.rice-new"; keep_edit "$src/shell.qml" "$d"
       else
-        rel2="${d#"$HOME"/}"; mkdir -p "$BK/$(dirname "$rel2")"; cp -aL "$d" "$BK/$rel2" 2>/dev/null || true
+        rel2="${d#"$HOME"/}"; mkdir -p "$BK/$(dirname "$rel2")"; cp -aL "$d" "$BK/$rel2" 2>/dev/null || warn "could not back up ~/$rel2 (it is replaced anyway)"
         [ -L "$d" ] && rm -f "$d"
         mv -f "$d.rice-new" "$d"; rec_sum "$d"
       fi
@@ -1023,8 +1025,8 @@ if [ "$MODE" = update ]; then
         [ "$target" = "${GUARD_CHECKED:-}" ] || update_guard "$prev" "$target" || exit 1
         stamp="$(date +%Y%m%d-%H%M%S)"
         gq branch "rice-before-update-$stamp" HEAD || true
-        gq stash push -u -m "rice: your changes before the update of $stamp" || true
-        if gq reset --hard "$up"; then
+        # only reset when the stash really kept the changes (a failed stash + reset --hard would lose them)
+        if gq stash push -u -m "rice: your changes before the update of $stamp" && gq reset --hard "$up"; then
           ok "Took the newest version (your old state: branch rice-before-update-$stamp, and git stash list)"
           exec "$ROOT/install.sh" --update --pulled "$@"
         fi
@@ -1033,7 +1035,7 @@ if [ "$MODE" = update ]; then
         fail "Could not get the newest version from GitHub (offline?). Nothing was changed."
         exit 1
       fi
-      warn "Could not get the newest version from GitHub (offline?). Continuing with the files you have."
+      warn "Could not get the newest version from GitHub (offline, or your changes could not be set aside). Continuing with the files you have."
     fi
   fi
 fi

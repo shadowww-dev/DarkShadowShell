@@ -698,12 +698,8 @@ PanelWindow {
         stdout: StdioCollector { onStreamFinished: { try { const j = JSON.parse(text.trim().split("\n").pop()); if (j && j.temp !== undefined) bar.wx = j } catch (e) { } } }
     }
     Timer { interval: 1800000; running: (bar.on || bar.ghostOnly) && (bar.hasMod("weather") || barPop.open); repeat: true; triggeredOnStart: true; onTriggered: if (!wxProc.running) wxProc.running = true }
-    property var st: ({})
-    Process {
-        command: [bar.home + "/.local/bin/rice-stats", "3"]
-        running: (bar.on || bar.ghostOnly) && (bar.hasMod("sysmon") || (barPop.open && barPop.kind === "system"))
-        stdout: SplitParser { onRead: function(l) { try { bar.st = JSON.parse(l) } catch (e) { } } }
-    }
+    // one rice-stats for the whole shell (Stats.qml)
+    readonly property var st: Stats.st
     // a side bar (VBar.qml) opens these cards too: "KIND" in ~/.cache/rice/barpop-open
     Trigger { name: "barpop-open"; onFired: function(o) { const p = o.trim().split(" "); barPop.toggle(p[1] || "calendar", p[2] !== undefined ? parseFloat(p[2]) : 200) } }
     function popAt(it, k) { const p = it.mapToItem(body, it.width / 2, 0); barPop.fromW = it.width + 16; barPop.toggle(k, p.x) }
