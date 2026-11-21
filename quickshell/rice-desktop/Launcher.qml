@@ -62,7 +62,12 @@ PanelWindow {
         onLoaded: { try { const l = JSON.parse(text()); if (Array.isArray(l)) ln.favs = l.filter(x => typeof x === "string") } catch (e) { } }
     }
     property int cur: 0
-    readonly property var apps: DesktopEntries.applications.values.filter(function(e) { return !e.noDisplay })
+    // plain rows: a DesktopEntry kept in the list goes dead when the desktop files reload, and a binding that
+    // reads it later segfaults (Quickshell #21). The entry is looked up again when the app is started.
+    readonly property var apps: DesktopEntries.applications.values.filter(function(e) { return !e.noDisplay }).map(function(e) {
+        return { id: e.id, name: e.name || "", g: e.genericName || "", k: (e.keywords || []).join(" "),
+                 c: e.comment || "", icon: e.icon || "" }
+    })
     property var results: []
     function sub(s, q) {            // letters of q appear in s in order
         let i = 0
@@ -76,9 +81,9 @@ PanelWindow {
         if (n.indexOf(" " + q) >= 0) return 800
         const at = n.indexOf(q)
         if (at >= 0) return 700 - at
-        const g = ((e.genericName || "") + " " + (e.keywords ? e.keywords.join(" ") : "")).toLowerCase()
+        const g = (e.g + " " + e.k).toLowerCase()
         if (g.indexOf(q) >= 0) return 400
-        if ((e.comment || "").toLowerCase().indexOf(q) >= 0) return 250
+        if (e.c.toLowerCase().indexOf(q) >= 0) return 250
         if (q.length >= 2 && sub(n, q)) return 150
         return -1
     }
@@ -113,7 +118,8 @@ PanelWindow {
             if (cvr) out.push({ kind: "calc", name: "= " + cvr.text, sub: cvr.from + "  ·  " + Tr.t("Press Enter to copy the result"), val: cvr.val })
         }
         for (let i = 0; i < list.length && i < 80; i++)
-            out.push({ kind: "app", name: list[i].e.name, sub: list[i].e.genericName || list[i].e.comment || "", entry: list[i].e, id: list[i].e.id })
+            out.push({ kind: "app", name: list[i].e.name, sub: list[i].e.g || list[i].e.c || "",
+                       id: list[i].e.id, icon: list[i].e.icon })
         // files in your home (rice-tools files), after a few letters; "/" in front: only files
         const fq = query.trim().replace(/^\//, "").trim()
         if (fq === filesFor) for (let i = 0; i < files.length; i++)
@@ -167,7 +173,7 @@ PanelWindow {
                         sh: "text-x-script", py: "text-x-script", qml: "text-x-script" }
             return Icons.get(m[ext] || "text-x-generic", true) || Icons.get("text-x-generic", true)
         }
-        const n = r.entry && r.entry.icon ? r.entry.icon : ""
+        const n = r.icon || ""
         const p = n !== "" ? Icons.get(n, true) : ""
         return p !== "" ? p : Icons.get("application-x-executable", true)
     }
@@ -195,7 +201,7 @@ PanelWindow {
         hide()
         try { Sfx.play("select") } catch (e) { }
         try {
-            if (r.kind === "app") { r.entry.execute(); bump(r.id) }
+            if (r.kind === "app") { const e = DesktopEntries.heuristicLookup(r.id); if (e) { e.execute(); bump(r.id) } }
             else if (r.kind === "calc") Quickshell.execDetached(["bash", "-c", "printf %s \"$1\" | wl-copy", "_", r.val])
             else if (r.kind === "web") Quickshell.execDetached(["xdg-open", "https://duckduckgo.com/?q=" + encodeURIComponent(r.q)])
             else if (r.kind === "file") Quickshell.execDetached(["xdg-open", r.path])

@@ -150,19 +150,22 @@ FloatingWindow {
             if (sl.idx === undefined) continue
             const pg = win.pages[sl.idx]
             if (!pg) continue
-            out.push({ page: sl.idx, label: I18n.t(pg.name), section: "", desc: I18n.t("Page"), pageName: I18n.t(pg.name), item: null, kind: "page" })
+            out.push({ page: sl.idx, label: I18n.t(pg.name), section: "", desc: I18n.t("Page"), pageName: I18n.t(pg.name), path: null, kind: "page" })
             const ctx = { section: "" }
-            const walk = function(it) {
+            // path: the indexes of the item from the slot down, never the item itself. Settings may be made again
+            // (a search makes every page, a visit to a tab too), so a hit kept as an item would read a destroyed
+            // object later and crash (Quickshell #21)
+            const walk = function(it, path) {
                 const kids = it.children || []
                 for (let k = 0; k < kids.length; k++) {
-                    const c = kids[k]
+                    const c = kids[k], p = path.concat([k])
                     if (c.sub !== undefined && c.text !== undefined && c.topPadding !== undefined && typeof c.text === "string") {
                         ctx.section = c.text
-                        if (c.text.length) out.push({ page: sl.idx, label: c.text, section: "", desc: c.sub || "", pageName: I18n.t(pg.name), item: c, kind: "section" })
+                        if (c.text.length) out.push({ page: sl.idx, label: c.text, section: "", desc: c.sub || "", pageName: I18n.t(pg.name), path: p, kind: "section" })
                         continue
                     }
                     if (c.reserved !== undefined && c.label !== undefined && typeof c.label === "string" && c.label.length) {
-                        out.push({ page: sl.idx, label: c.label, section: ctx.section, desc: c.desc || "", pageName: I18n.t(pg.name), item: c, kind: "row" })
+                        out.push({ page: sl.idx, label: c.label, section: ctx.section, desc: c.desc || "", pageName: I18n.t(pg.name), path: p, kind: "row" })
                         continue
                     }
                     // a heading made with a plain title text: it names the section too
@@ -173,12 +176,12 @@ FloatingWindow {
                     // a setting with its own layout (like the clock fonts): its 14 px name counts too
                     if (c.kind === "body" && typeof c.text === "string" && c.font && c.font.pixelSize === 14 && !c.font.bold
                             && c.text.length > 2 && c.text.length < 40 && c.text.indexOf("<") < 0) {
-                        out.push({ page: sl.idx, label: c.text, section: ctx.section, desc: "", pageName: I18n.t(pg.name), item: c.parent || c, kind: "row" })
+                        out.push({ page: sl.idx, label: c.text, section: ctx.section, desc: "", pageName: I18n.t(pg.name), path: path, kind: "row" })
                     }
-                    walk(c)
+                    walk(c, p)
                 }
             }
-            walk(sl)
+            walk(sl, [])
         }
         // the same setting twice (a page that keeps two copies of a part): once is enough
         const seen = {}
@@ -218,21 +221,31 @@ FloatingWindow {
         scored.sort((a, b) => (b.s - a.s) || (a.e.label.length - b.e.label.length))
         results = scored.slice(0, 40).map(x => x.e)
     }
+    // the item a search hit points at, read again from the page as it is now
+    function itemAt(slot, path) {
+        let it = slot
+        for (let i = 0; i < path.length && it; i++) it = (it.children || [])[path[i]]
+        return it || null
+    }
     function openResult(r) {
         if (!r) return
         Sfx.play("select")
         searchIn.text = ""
         card.forceActiveFocus()
         page = r.page
-        if (r.item) { jumpTo.target = r.item; jumpTo.restart() }
+        jumpTo.pg = r.page; jumpTo.path = r.path; jumpTo.restart()
     }
     // after the page has changed: scroll to the setting and light it up for a moment
     Timer {
         id: jumpTo
-        property var target: null
+        property int pg: -1
+        property var path: null
         interval: 380
         onTriggered: {
-            const it = target
+            let slot = null
+            const l = pagesHolder.children
+            for (let i = 0; i < l.length; i++) if (l[i].idx === jumpTo.pg) slot = l[i]
+            const it = slot && jumpTo.path ? itemAt(slot, jumpTo.path) : null
             if (!it) return
             let f = it.parent
             while (f && f.contentY === undefined) f = f.parent

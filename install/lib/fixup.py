@@ -5,7 +5,12 @@
 - V3.17: the Hyprland autostart starts the DarkShadow bar (rice-bar start: Waybar only if you switched it off) and
   ALT + Space opens the DarkShadow Launcher (rice-launch: Rofi if you chose Rofi). A copy of the file is kept next to it
 Prints one line per change. Safe to run many times.
+
+Every file is read and written while holding hypr-set's lock (~/.config/rice/.hypr.lock), so an update that runs
+while Settings changes a value cannot put an old copy back over the change; each write goes to FILE.tmp and is then
+swapped in, so a stopped install never leaves a half-written or empty config behind.
 """
+import fcntl
 import json
 import os
 import re
@@ -13,7 +18,27 @@ import sys
 
 home = os.path.expanduser("~")
 hypr = home + "/.config/hypr"
+rice = home + "/.config/rice"
 changes = []
+
+for d in (hypr, rice):
+    try:
+        os.makedirs(d, exist_ok=True)
+    except OSError:
+        pass
+_lock = open(os.path.join(rice, ".hypr.lock"), "w")
+fcntl.flock(_lock, fcntl.LOCK_EX)     # the same lock hypr-set takes (one writer at a time)
+
+
+def write_atomic(path, text):
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(text)
+    try:
+        os.chmod(tmp, os.stat(path).st_mode & 0o7777)     # os.replace would make it 0644 and lose 0600
+    except OSError:
+        pass
+    os.replace(tmp, path)
 
 
 def fix_requires(path):
@@ -30,7 +55,7 @@ def fix_requires(path):
         return "%s-- [DarkShadow's Shell] missing on this computer: %s" % (indent, m.group(0).strip())
     n = re.sub(r'^([ \t]*)require\(\s*"([^"]+)"\s*\)[^\n]*$', repl, s, flags=re.M)
     if n != s:
-        open(path, "w").write(n)
+        write_atomic(path, n)
 
 
 def clamp_lua(path):
@@ -46,7 +71,7 @@ def clamp_lua(path):
         return m.group(1) + str(nv)
     n = re.sub(r'(render_power"?\]?\s*[=,:]\s*)(\d+)', repl, s)
     if n != s:
-        open(path, "w").write(n)
+        write_atomic(path, n)
 
 
 def clamp_json(path):
@@ -66,7 +91,7 @@ def clamp_json(path):
                     walk(v)
     walk(j)
     if hit:
-        json.dump(j, open(path, "w"))
+        write_atomic(path, json.dumps(j, indent=2))
         changes.append("%s: shadow render_power clamped to 1..4" % os.path.basename(path))
 
 
@@ -107,8 +132,8 @@ hl.bind("XF86AudioMicMute",     hl.dsp.exec_cmd("$HOME/.local/bin/rice-volume mi
     if n != s:
         bak = path + ".bak-bar"
         if not os.path.exists(bak):
-            open(bak, "w").write(s)
-        open(path, "w").write(n)
+            write_atomic(bak, s)
+        write_atomic(path, n)
         changes.append("hyprland.lua: bar, launcher and volume keys of DarkShadow's Shell (copy: hyprland.lua.bak-bar)")
 
 
@@ -124,11 +149,11 @@ if os.path.isdir(hypr):
             t = open(pth).read()
             t2 = t.replace('hl.dsp.exec_cmd("hyprlock")', 'hl.dsp.exec_cmd("$HOME/.local/bin/rice-lock now")')
             if t2 != t:
-                open(pth, "w").write(t2)
+                write_atomic(pth, t2)
                 changes.append(extra + ": SUPER + L uses the new lock screen")
         except OSError:
             pass
-clamp_json(home + "/.config/rice/hypr.json")
+clamp_json(os.path.join(rice, "hypr.json"))
 
 for c in changes:
     print(c)

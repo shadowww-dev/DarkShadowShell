@@ -44,24 +44,22 @@ Singleton {
         }
     }
 
-    Process {
-        id: proc
-        command: ["bash", "-c", "cat \"$HOME/.config/rice/fonts.json\" 2>/dev/null"]
-        running: true
-        stdout: StdioCollector {
-            onStreamFinished: {
-                let j = {}
-                try { j = JSON.parse(text) } catch (e) { j = {} }
-                f.v = j.v || (text.trim() === "" ? 2 : 1)
-                f.rMain = j.main || ""; f.rNumbers = j.numbers || ""; f.rTitle = j.title || ""
-                f.rReading = j.reading || ""; f.rMono = j.mono || ""; f.rIcons = j.icons || ""
-            }
-        }
+    // watched (inotify), not run as a bash process every 1.5 s; a slow re-read catches a late create
+    function applyTxt(t) {
+        let j = {}
+        try { j = JSON.parse(t) } catch (e) { j = {} }
+        f.v = j.v || (t.trim() === "" ? 2 : 1)
+        f.rMain = j.main || ""; f.rNumbers = j.numbers || ""; f.rTitle = j.title || ""
+        f.rReading = j.reading || ""; f.rMono = j.mono || ""; f.rIcons = j.icons || ""
     }
-    Timer {
-        interval: 1500
-        running: true
-        repeat: true
-        onTriggered: { if (!proc.running) proc.running = true }
+    FileView {
+        id: cfgFile
+        path: Quickshell.env("HOME") + "/.config/rice/fonts.json"
+        watchChanges: true
+        printErrors: false
+        onFileChanged: reload()
+        onLoaded: f.applyTxt(text())
+        onLoadFailed: f.applyTxt("")
     }
+    Timer { interval: 30000; running: true; repeat: true; onTriggered: cfgFile.reload() }
 }

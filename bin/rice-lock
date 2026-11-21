@@ -413,6 +413,14 @@ def sync_shared():
         pass
     for n in SHARED:
         src, dst = QS + "/rice-desktop/%s.qml" % n, LOCKQS + "/%s.qml" % n
+        if n in ("Sfx", "SfxBank", "Fonts"):
+            # these live in the settings app too; when the two copies drifted, the one Settings had was the newer
+            alt = QS + "/rice-settings/%s.qml" % n
+            try:
+                if os.path.getmtime(alt) > os.path.getmtime(src):
+                    src = alt
+            except OSError:
+                pass
         try:
             if os.path.exists(src) and (not os.path.exists(dst) or open(src).read() != open(dst).read()):
                 tmp = dst + ".rice-new"

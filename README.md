@@ -167,15 +167,17 @@ The installer asks which window manager you want (Hyprland, niri or both), insta
 | Keys | Action |
 | --- | --- |
 | `SUPER + U` | open **Settings** |
-| `SUPER + Q` | terminal |
+| `SUPER + Return` | terminal |
 | `SUPER + E` | file manager |
 | `SUPER + R` | app menu |
 | `ALT + Space` | app launcher (DarkShadow Launcher) |
-| `SUPER + C` | close window |
-| `SUPER + V` | toggle floating |
+| `SUPER + Q` | close window |
+| `SUPER + V` | clipboard history |
+| `SUPER + SHIFT + V` | toggle floating |
 | `SUPER + P` | pseudo-tile |
 | `SUPER + J` | toggle split direction |
 | `SUPER + M` | exit Hyprland |
+| `SUPER + L` | lock the screen |
 | `SUPER + ←/→/↑/↓` | move focus |
 | `SUPER + 1 … 0` | go to workspace |
 | `SUPER + SHIFT + 1 … 0` | move window to workspace |
@@ -184,6 +186,11 @@ The installer asks which window manager you want (Hyprland, niri or both), insta
 | `SUPER + scroll` | next/previous workspace |
 | `SUPER + left mouse` | drag window |
 | `SUPER + right mouse` | resize window |
+| `SUPER + H` / `SUPER + SHIFT + H` | minimize / bring back the window |
+| `SUPER + T` | stack windows (tabs) |
+| `SUPER + F` | Infinite Desktop |
+| `SUPER + X` | toolbox: tasks, note, timer, converter, chat |
+| `SUPER + /` | all the keys |
 | `ALT + ]` / `ALT + [` | volume up / down |
 | `SUPER + F12` / `F11` / `F10` | volume up / down / mute (with on-screen display) |
 | media keys | play/pause, next, previous |

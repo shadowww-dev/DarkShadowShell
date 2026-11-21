@@ -51,7 +51,7 @@ print(json.dumps({"place": p}))' "$CFG" ;;
       # shows (cached in weather.txt) is turned into the same JSON, so the forecast is never left empty
       raw=""
       for _try in 1 2; do
-        raw="$(curl -s -m 15 "wttr.in/$url_place?format=j1&lang=en")"
+        raw="$(curl -fsS -m 15 "https://wttr.in/$url_place?format=j1&lang=en")"
         case "$raw" in "{"*) break ;; esac
         raw=""; sleep 1
       done
@@ -108,7 +108,7 @@ print(json.dumps(out))
       exit 0
     fi
     [ -n "$url_place" ] || { [ -s "$HOME/.cache/rice/weather.txt" ] && cat "$HOME/.cache/rice/weather.txt"; exit 1; }
-    out="$(curl -s -m 10 "wttr.in/$url_place?format=%C|%t|%l&${unit}&lang=en")" || exit 1
+    out="$(curl -fsS -m 10 "https://wttr.in/$url_place?format=%C|%t|%l&${unit}&lang=en")" || exit 1
     case "$out" in ""|*Unknown*|*"<"*) exit 1 ;; esac
     [ "$(printf '%s' "$out" | tr -cd '|' | wc -c | tr -d ' ')" = 2 ] || exit 1
     mkdir -p "$HOME/.cache/rice"

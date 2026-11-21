@@ -6,12 +6,15 @@
 #   rice-fonts status    show what is installed
 set -euo pipefail
 dir="$HOME/.local/share/fonts/shadows-shell"
-# shortcut: fonts come from main/latest over HTTPS and are not hash-pinned (their URLs move with upstream)
-# upgrade path: pin the URLs to commits/tags, add their SHA-256 to install/checksums.txt, check before unpacking
+# every download is a commit or a tag, and its SHA-256 is in install/checksums.txt (nothing moves with upstream)
+FONTS_REV="06bfe0d62a98375cb09c942fa18e68bd32cff057"
+MDI_REV="10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7"
+CJK_REV="f8d157532fbfaeda587e826d4cd5b21a49186f7c"
+NF_REV="v3.5.1"
 INTER_URL="https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip"
-RUBIK_URL="https://raw.githubusercontent.com/google/fonts/main/ofl/rubik/Rubik%5Bwght%5D.ttf"
+RUBIK_URL="https://raw.githubusercontent.com/google/fonts/$FONTS_REV/ofl/rubik/Rubik%5Bwght%5D.ttf"
 # icons of the dashboard (the same set Caelestia and end4 use)
-SYMBOLS_URL="https://raw.githubusercontent.com/google/material-design-icons/master/variablefont/MaterialSymbolsRounded%5BFILL%2CGRAD%2Copsz%2Cwght%5D.ttf"
+SYMBOLS_URL="https://raw.githubusercontent.com/google/material-design-icons/$MDI_REV/variablefont/MaterialSymbolsRounded%5BFILL%2CGRAD%2Copsz%2Cwght%5D.ttf"
 
 has() {
   local fams
@@ -19,8 +22,28 @@ has() {
   grep -qiE "(^|,)$1( |,|$)" <<<"$fams"
 }
 
+# the hashes install.sh put next to the scripts (a repo checkout works too)
+SUMS="$HOME/.local/share/rice/checksums.txt"
+[ -f "$SUMS" ] || SUMS="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)/install/checksums.txt"
+sha256_of() {
+  if command -v sha256sum >/dev/null; then sha256sum "$1" | cut -c1-64
+  else shasum -a 256 "$1" | cut -c1-64; fi
+}
+get() { # get NAME URL DEST: download once, keep it only when it matches its pinned SHA-256
+  local name="$1" url="$2" dst="$3" want got
+  want="$(awk -v n="$name" '$2 == n { print $1; exit }' "$SUMS" 2>/dev/null)"
+  if [ -z "$want" ]; then echo "$name: no SHA-256 in install/checksums.txt, not downloading"; return 1; fi
+  curl -fsSL -o "$dst" "$url" || return 1
+  got="$(sha256_of "$dst")"
+  if [ "$got" != "$want" ]; then
+    rm -f "$dst"
+    echo "$name: does not match its SHA-256 (got ${got:-nothing}), not used"
+    return 1
+  fi
+}
+
 # lock screen clock fonts (Settings > Idle & Lockscreen > Clock font), all SIL Open Font License
-GF="https://raw.githubusercontent.com/google/fonts/main/ofl"
+GF="https://raw.githubusercontent.com/google/fonts/$FONTS_REV/ofl"
 CLOCK_FONTS=(
   "Bebas Neue|$GF/bebasneue/BebasNeue-Regular.ttf|BebasNeue.ttf"
   "Orbitron|$GF/orbitron/Orbitron%5Bwght%5D.ttf|Orbitron-Variable.ttf"
@@ -32,7 +55,7 @@ CLOCK_FONTS=(
 
 # Japanese, Korean and Chinese text (Settings > System > Languages): Noto Sans CJK for that language, three weights
 # (about 13 MB). rice-fonts cjk ja|ko|zh-CN  (exit 0: there now, 2: it was there already, 1: could not download)
-CJK_URL="https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/SubsetOTF"
+CJK_URL="https://raw.githubusercontent.com/notofonts/noto-cjk/$CJK_REV/Sans/SubsetOTF"
 if [ "${1:-}" = "cjk" ]; then
   case "${2:-}" in
     ja*) sub=JP; lc=ja ;; ko*) sub=KR; lc=ko ;; zh-TW|zh-HK) sub=TC; lc=zh-tw ;; zh*) sub=SC; lc=zh-cn ;;
@@ -44,7 +67,7 @@ if [ "${1:-}" = "cjk" ]; then
   ok=0
   for w in Regular Medium Bold; do
     f="NotoSans$sub-$w.otf"
-    if curl -fsSL -o "$dir/cjk/$f.part" "$CJK_URL/$sub/$f" && [ "$(head -c 4 "$dir/cjk/$f.part")" = "OTTO" ]; then
+    if get "$f" "$CJK_URL/$sub/$f" "$dir/cjk/$f.part" && [ "$(head -c 4 "$dir/cjk/$f.part")" = "OTTO" ]; then
       mv "$dir/cjk/$f.part" "$dir/cjk/$f"; ok=1
     else
       rm -f "$dir/cjk/$f.part"
@@ -73,7 +96,7 @@ for e in "Google Sans Flex|$GF/googlesansflex/GoogleSansFlex%5BROND%2Copsz%2Csln
   IFS='|' read -r fam url file <<<"$e"
   if has "$fam"; then
     echo "$fam: already installed"
-  elif curl -fsSL -o "$tmp/$file" "$url" && [ "$(head -c 4 "$tmp/$file" | od -An -tx1 | tr -d ' ')" = "00010000" ]; then
+  elif get "$file" "$url" "$tmp/$file" && [ "$(head -c 4 "$tmp/$file" | od -An -tx1 | tr -d ' ')" = "00010000" ]; then
     mv "$tmp/$file" "$dir/$file"
     echo "$fam: installed"
     changed=1
@@ -86,29 +109,36 @@ if has Inter; then
   echo "Inter: already installed"
 else
   echo "Inter: downloading..."
-  curl -fsSL -o "$tmp/inter.zip" "$INTER_URL"
-  python3 - "$tmp/inter.zip" "$dir" <<'PY'
+  if get Inter-4.1.zip "$INTER_URL" "$tmp/inter.zip"; then
+    python3 - "$tmp/inter.zip" "$dir" <<'PY'
 import sys, zipfile
 z = zipfile.ZipFile(sys.argv[1])
 for n in ("InterVariable.ttf", "InterVariable-Italic.ttf"):
     open(sys.argv[2] + "/" + n, "wb").write(z.read(n))
 PY
-  changed=1
+    changed=1
+  else
+    echo "Inter: could not download"
+  fi
 fi
 
 if has Rubik; then
   echo "Rubik: already installed"
 else
   echo "Rubik: downloading..."
-  curl -fsSL -o "$dir/Rubik-Variable.ttf" "$RUBIK_URL"
-  changed=1
+  if get Rubik-Variable.ttf "$RUBIK_URL" "$tmp/Rubik-Variable.ttf"; then
+    mv "$tmp/Rubik-Variable.ttf" "$dir/Rubik-Variable.ttf"
+    changed=1
+  else
+    echo "Rubik: could not download"
+  fi
 fi
 
 if has "Material Symbols Rounded"; then
   echo "Material Symbols Rounded: already installed"
 else
   echo "Material Symbols Rounded: downloading..."
-  if curl -fsSL -o "$tmp/symbols.ttf" "$SYMBOLS_URL" && [ "$(head -c 4 "$tmp/symbols.ttf" | od -An -tx1 | tr -d ' ')" = "00010000" ]; then
+  if get MaterialSymbolsRounded.ttf "$SYMBOLS_URL" "$tmp/symbols.ttf" && [ "$(head -c 4 "$tmp/symbols.ttf" | od -An -tx1 | tr -d ' ')" = "00010000" ]; then
     mv "$tmp/symbols.ttf" "$dir/MaterialSymbolsRounded.ttf"
     changed=1
   else
@@ -117,12 +147,12 @@ else
 fi
 
 # icons: JetBrains Mono Nerd Font and Symbols Nerd Font (packaged on Arch and NixOS, not on Fedora)
-NF="https://github.com/ryanoasis/nerd-fonts/releases/latest/download"
+NF="https://github.com/ryanoasis/nerd-fonts/releases/download/$NF_REV"
 for e in "JetBrainsMono Nerd Font|JetBrainsMono|JetBrainsMonoNerdFont-*.ttf" "Symbols Nerd Font|NerdFontsSymbolsOnly|SymbolsNerdFont-*.ttf"; do
   IFS='|' read -r fam pkg pat <<<"$e"
   if has "$fam"; then
     echo "$fam: already installed"
-  elif command -v tar >/dev/null && curl -fsSL -o "$tmp/$pkg.tar.xz" "$NF/$pkg.tar.xz" &&
+  elif command -v tar >/dev/null && get "$pkg.tar.xz" "$NF/$pkg.tar.xz" "$tmp/$pkg.tar.xz" &&
        mkdir -p "$dir/$pkg" && tar -xJf "$tmp/$pkg.tar.xz" -C "$dir/$pkg" --wildcards "$pat" 2>/dev/null; then
     echo "$fam: installed"
     changed=1
@@ -135,7 +165,7 @@ done
 # (only Nerd Fonts count: Material Symbols and Unifont use the same code range for other pictures)
 if command -v fc-list >/dev/null && ! fc-list ':charset=f385' family 2>/dev/null | grep -qi 'nerd'; then
   echo "Logo icons (CachyOS): your Nerd Font is older, downloading the newest icons..."
-  if command -v tar >/dev/null && curl -fsSL -o "$tmp/logos.tar.xz" "$NF/NerdFontsSymbolsOnly.tar.xz" &&
+  if command -v tar >/dev/null && get NerdFontsSymbolsOnly.tar.xz "$NF/NerdFontsSymbolsOnly.tar.xz" "$tmp/logos.tar.xz" &&
      mkdir -p "$dir/NerdFontsSymbolsOnly" && tar -xJf "$tmp/logos.tar.xz" -C "$dir/NerdFontsSymbolsOnly" --wildcards "SymbolsNerdFont-*.ttf" 2>/dev/null; then
     echo "Logo icons: installed"
     changed=1
@@ -148,7 +178,7 @@ for e in "${CLOCK_FONTS[@]}"; do
   IFS='|' read -r fam url file <<<"$e"
   if has "$fam"; then
     echo "$fam: already installed"
-  elif curl -fsSL -o "$tmp/clock.ttf" "$url" && [ "$(head -c 4 "$tmp/clock.ttf" | od -An -tx1 | tr -d ' ')" = "00010000" ]; then
+  elif get "$file" "$url" "$tmp/clock.ttf" && [ "$(head -c 4 "$tmp/clock.ttf" | od -An -tx1 | tr -d ' ')" = "00010000" ]; then
     mv "$tmp/clock.ttf" "$dir/$file"
     echo "$fam: installed (lock screen clock)"
     changed=1

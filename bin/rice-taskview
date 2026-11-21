@@ -81,7 +81,9 @@ def cfg():
 
 def put(c):
     os.makedirs(os.path.dirname(CONF), exist_ok=True)
-    json.dump(c, open(CONF, "w"), indent=1)
+    with open(CONF + ".tmp", "w") as f:
+        json.dump(c, f, indent=1)
+    os.replace(CONF + ".tmp", CONF)
 
 
 def tell(mode):

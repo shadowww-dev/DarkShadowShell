@@ -626,7 +626,7 @@ def cmd_autostart_toggle(line):
     if not os.path.exists(bak):
         shutil.copy(MAIN, bak)
     lines[n - 1] = m.group(1) + (m.group(3) if m.group(2) else "-- " + m.group(3))
-    open(MAIN, "w").write("\n".join(lines))
+    write_atomic(MAIN, "\n".join(lines))
 
 
 def monitors_json():
@@ -711,7 +711,7 @@ def cmd_monitor_apply(name, res, rate, scale):
     pos = "%dx%d" % (m["x"], m["y"])
     os.makedirs(DIR, exist_ok=True)
     if not os.path.exists(PREV):
-        json.dump({"name": name, "mode": mode_str(m), "position": pos, "scale": m.get("scale", 1)}, open(PREV, "w"))
+        write_atomic(PREV, json.dumps({"name": name, "mode": mode_str(m), "position": pos, "scale": m.get("scale", 1)}))
     if not mon_eval(name, "%s@%s" % (res, rate), pos, scale):
         sys.exit(1)
 
@@ -725,7 +725,7 @@ def remember_all():
     """before a change of several screens: how all of them are now (Revert brings this back)"""
     os.makedirs(DIR, exist_ok=True)
     if not os.path.exists(PREV):
-        json.dump({"all": [mon_state(m) for m in monitors_json()]}, open(PREV, "w"))
+        write_atomic(PREV, json.dumps({"all": [mon_state(m) for m in monitors_json()]}))
 
 
 def mon_set_full(st):
@@ -1088,7 +1088,7 @@ def cmd_regen():
     if os.path.exists(ST):
         s = load()
         os.makedirs(os.path.dirname(OUT), exist_ok=True)
-        open(OUT, "w").write(generate(s))
+        write_atomic(OUT, generate(s))
 
 
 def cmd_kbd_options(opts):

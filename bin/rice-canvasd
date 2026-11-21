@@ -310,7 +310,8 @@ def nstate():
 def nsave(st):
     try:
         os.makedirs(os.path.dirname(NSTATE), exist_ok=True)
-        json.dump(st, open(NSTATE, "w"))
+        json.dump(st, open(NSTATE + ".tmp", "w"))
+        os.replace(NSTATE + ".tmp", NSTATE)
     except OSError:
         pass
 

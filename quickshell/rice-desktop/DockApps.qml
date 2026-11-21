@@ -21,10 +21,10 @@ PanelWindow {
     NPal { id: pal; theme: "shell"; alpha: dock ? Math.min(1, dock.alpha + 0.12) : 0.9 }
 
     function idOf(e) { return (e.id || "").replace(/\.desktop$/, "") }
-    function isPinned(e) { const i = idOf(e); return pinnedIds.indexOf(i) >= 0 }
-    function togglePin(e) {
-        const i = idOf(e)
-        const pinned = isPinned(e)
+    function isPinned(id) { return pinnedIds.indexOf(id) >= 0 }
+    function togglePin(row) {
+        const i = row.id
+        const pinned = isPinned(i)
         Quickshell.execDetached(["bash", "-c", "\"$HOME/.local/bin/desktop-set\" \"$1\" \"$2\"", "_", pinned ? "dock-unpin" : "dock-pin", i])
         // show it at once; desktop.json brings the same list back in a moment
         if (dock) {
@@ -33,6 +33,8 @@ PanelWindow {
             dock.dc = n
         }
     }
+    // plain rows: a DesktopEntry kept in the grid goes dead when the desktop files reload, and reading it
+    // later segfaults (Quickshell #21). The entry is looked up again when the app is started.
     readonly property var apps: {
         const l = DesktopEntries.applications.values.filter(function(e) { return !e.noDisplay })
         const q = search.text.trim().toLowerCase()
@@ -40,12 +42,12 @@ PanelWindow {
             return (e.name || "").toLowerCase().indexOf(q) >= 0 || (e.genericName || "").toLowerCase().indexOf(q) >= 0
                 || (e.keywords || []).join(" ").toLowerCase().indexOf(q) >= 0
         })
-        return f.slice().sort(function(a, b) {
-            const pa = am.isPinned(a) ? 0 : 1, pb = am.isPinned(b) ? 0 : 1
-            return pa !== pb ? pa - pb : (a.name || "").localeCompare(b.name || "")
+        return f.map(function(e) { return { id: idOf(e), name: e.name || "", icon: e.icon || "" } }).sort(function(a, b) {
+            const pa = isPinned(a.id) ? 0 : 1, pb = isPinned(b.id) ? 0 : 1
+            return pa !== pb ? pa - pb : a.name.localeCompare(b.name)
         })
     }
-    function launch(e) { e.execute(); open = false }
+    function launch(row) { const e = DesktopEntries.heuristicLookup(row.id); if (e) e.execute(); open = false }
 
     visible: open || (t > 0.01 && !closeT.done)
     // if the closing animation ever stalls (the compositor sent no frames for a moment), it still goes away
@@ -109,7 +111,7 @@ PanelWindow {
             delegate: Item {
                 id: cellIt
                 width: grid.cellWidth; height: grid.cellHeight
-                readonly property bool pin: am.isPinned(modelData)
+                readonly property bool pin: am.isPinned(modelData.id)
                 opacity: am.stg(index); transform: Translate { y: (1 - am.stg(index)) * 18 }
                 Rectangle {
                     anchors.fill: parent; anchors.margins: 4; radius: 22

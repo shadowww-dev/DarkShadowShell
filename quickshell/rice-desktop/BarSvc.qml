@@ -21,7 +21,9 @@ Singleton {
         command: ["bash", "-c", "\"$HOME/.local/bin/rice-services\" state 2>/dev/null"]
         stdout: StdioCollector { onStreamFinished: { try { svc.state = JSON.parse(text) } catch (e) { } } }
     }
-    Timer { interval: 8000; running: svc.shown || svc.sideShown; repeat: true; triggeredOnStart: true; onTriggered: svc.refresh() }
+    // the switches change rarely from outside the shell (a click refreshes in 700 ms, below): 30 s is plenty and
+    // keeps this from starting rice-services (a Python process and 6-9 subprocesses) 11 times a minute
+    Timer { interval: 30000; running: svc.shown || svc.sideShown; repeat: true; triggeredOnStart: true; onTriggered: svc.refresh() }
     Timer { id: soon; interval: 700; onTriggered: svc.refresh() }
     Process {
         id: wxProc

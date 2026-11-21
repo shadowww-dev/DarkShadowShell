@@ -45,14 +45,19 @@ ICONS = HOME + "/.local/share/icons"
 PACKS_DB = ICONS + "/.rice-cursor-packs.json"
 # cursor packs Settings > Cursors can download (and the installer does once)
 PACKS = [
+    # every URL is a tag (or a commit), and its SHA-256 is in install/checksums.txt: never releases/latest
     {"id": "rose-pine", "name": "Rose Pine", "desc": "Soft, rounded Hyprcursor theme made for Hyprland",
-     "kind": "git", "url": "https://github.com/ndom91/rose-pine-hyprcursor"},
+     "kind": "zip", "file": "rose-pine-hyprcursor-4b02963d0baf0bee18725cf7c5762b3b3c1392f1.zip",
+     "url": "https://github.com/ndom91/rose-pine-hyprcursor/archive/4b02963d0baf0bee18725cf7c5762b3b3c1392f1.zip"},
     {"id": "catppuccin-dark", "name": "Catppuccin Mocha Dark", "desc": "Dark Catppuccin cursors",
-     "kind": "zip", "url": "https://github.com/catppuccin/cursors/releases/latest/download/catppuccin-mocha-dark-cursors.zip"},
+     "kind": "zip", "file": "catppuccin-mocha-dark-cursors.zip",
+     "url": "https://github.com/catppuccin/cursors/releases/download/v2.0.0/catppuccin-mocha-dark-cursors.zip"},
     {"id": "catppuccin-mauve", "name": "Catppuccin Mocha Mauve", "desc": "Catppuccin with a soft purple accent",
-     "kind": "zip", "url": "https://github.com/catppuccin/cursors/releases/latest/download/catppuccin-mocha-mauve-cursors.zip"},
+     "kind": "zip", "file": "catppuccin-mocha-mauve-cursors.zip",
+     "url": "https://github.com/catppuccin/cursors/releases/download/v2.0.0/catppuccin-mocha-mauve-cursors.zip"},
     {"id": "phinger", "name": "Phinger", "desc": "Clean, playful cursors in dark and light",
-     "kind": "tar", "url": "https://github.com/phisch/phinger-cursors/releases/latest/download/phinger-cursors-variants.tar.bz2"},
+     "kind": "tar", "file": "phinger-cursors-variants.tar.bz2",
+     "url": "https://github.com/phisch/phinger-cursors/releases/download/v2.2/phinger-cursors-variants.tar.bz2"},
 ]
 
 
@@ -66,7 +71,8 @@ def load():
 
 def save(c):
     os.makedirs(os.path.dirname(CFG), exist_ok=True)
-    json.dump(c, open(CFG, "w"))
+    json.dump(c, open(CFG + ".tmp", "w"))
+    os.replace(CFG + ".tmp", CFG)
 
 
 def manifest(d):
@@ -478,20 +484,18 @@ def get_pack(pid):
     try:
         src = os.path.join(tmp, "src")
         os.makedirs(src)
-        if pk["kind"] == "git" and shutil.which("git"):
-            r = subprocess.run(["git", "clone", "--depth", "1", "-q", pk["url"], os.path.join(src, os.path.basename(pk["url"]))],
-                               capture_output=True, text=True, timeout=180, env=dict(os.environ, GIT_TERMINAL_PROMPT="0"))
-            if r.returncode != 0:
-                raise RuntimeError(r.stderr.strip().splitlines()[-1] if r.stderr.strip() else "git clone failed")
-            shutil.rmtree(os.path.join(src, os.path.basename(pk["url"]), ".git"), ignore_errors=True)
-        else:
-            url = pk["url"] + "/archive/refs/heads/main.zip" if pk["kind"] == "git" else pk["url"]
-            kind = "zip" if pk["kind"] in ("git", "zip") else "tar"
-            arch = os.path.join(tmp, "pack." + ("zip" if kind == "zip" else "tar"))
-            req = urllib.request.Request(url, headers={"User-Agent": "rice-cursor"})
-            with urllib.request.urlopen(req, timeout=60) as resp, open(arch, "wb") as f:
-                shutil.copyfileobj(resp, f)
-            safe_extract(arch, kind, src)
+        want = expected_sha(pk["file"])
+        if not want:
+            raise RuntimeError("no SHA-256 for %s in install/checksums.txt: not downloading it" % pk["file"])
+        kind = "zip" if pk["kind"] == "zip" else "tar"
+        arch = os.path.join(tmp, "pack." + kind)
+        req = urllib.request.Request(pk["url"], headers={"User-Agent": "rice-cursor"})
+        with urllib.request.urlopen(req, timeout=120) as resp, open(arch, "wb") as f:
+            shutil.copyfileobj(resp, f)
+        got = hashlib.sha256(open(arch, "rb").read()).hexdigest()
+        if got != want:
+            raise RuntimeError("%s does not match its SHA-256 (got %s): the download was not used" % (pk["file"], got))
+        safe_extract(arch, kind, src)
         roots = theme_roots(src)
         if not roots:
             raise RuntimeError("no cursor theme found in the download")
@@ -506,7 +510,8 @@ def get_pack(pid):
             names.append(name)
         db = packs_db()
         db[pid] = names
-        json.dump(db, open(PACKS_DB, "w"))
+        json.dump(db, open(PACKS_DB + ".tmp", "w"))
+        os.replace(PACKS_DB + ".tmp", PACKS_DB)
         return names
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

@@ -49,6 +49,9 @@ Scope {
     readonly property var player: pickPlayer()
     readonly property bool showMedia: dc.media !== false && player !== null
 
+    // The rows hold strings and booleans, never a Toplevel or a DesktopEntry: Quickshell deletes those objects when
+    // a window closes or the desktop files reload, and a binding that later reads the dead object in a row
+    // segfaults (Quickshell #21). The object is looked up again when it is used.
     function build() {
         const tl = ToplevelManager.toplevels.values
         const out = []
@@ -64,21 +67,31 @@ Scope {
                 if (id !== "" && ids.indexOf(id) >= 0) { t = tl[j]; break }
             }
             if (t) used[(t.appId || "").toLowerCase()] = true
-            out.push({ entry: e, tl: t, key: apps[i] })
+            out.push({ key: apps[i], icon: e.icon || apps[i].toLowerCase(), appId: t ? (t.appId || "") : "",
+                       running: t !== null, act: t !== null && t.activated === true })
         }
         for (let j = 0; j < tl.length; j++) {
             const id = (tl[j].appId || "").toLowerCase()
             if (id === "" || used[id]) continue
             used[id] = true
-            out.push({ entry: DesktopEntries.heuristicLookup(tl[j].appId), tl: tl[j], key: id })
+            const e = DesktopEntries.heuristicLookup(tl[j].appId)
+            out.push({ key: id, icon: e && e.icon ? e.icon : (tl[j].appId || "").toLowerCase(),
+                       appId: tl[j].appId || "", running: true, act: tl[j].activated === true })
         }
         return out
     }
     readonly property var items: build()
     function iconFor(it) {
-        const n = it.entry ? it.entry.icon : (it.tl ? (it.tl.appId || "").toLowerCase() : "")
+        const n = it.icon || it.appId || ""
         const p = n !== "" ? Icons.get(n, true) : ""
         return p !== "" ? p : Icons.get("application-x-executable", true)
+    }
+    function press(it) {
+        const tl = ToplevelManager.toplevels.values
+        for (let i = 0; i < tl.length; i++)
+            if (it.appId !== "" && (tl[i].appId || "") === it.appId) { tl[i].activate(); return }
+        const e = DesktopEntries.heuristicLookup(it.key)
+        if (e) e.execute()
     }
 
     // ---------------- the strip that brings the dock back ----------------
@@ -174,8 +187,8 @@ Scope {
                         id: app
                         width: dock.vert ? dock.thick - 12 : dock.cell
                         height: dock.vert ? dock.cell : dock.thick - 12
-                        readonly property bool running: modelData.tl !== null
-                        readonly property bool act: !!modelData.tl && modelData.tl.activated
+                        readonly property bool running: modelData.running
+                        readonly property bool act: modelData.act
                         Image {
                             id: ico
                             anchors.centerIn: parent
@@ -223,10 +236,7 @@ Scope {
                             anchors.fill: parent
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                if (modelData.tl) modelData.tl.activate()
-                                else if (modelData.entry) modelData.entry.execute()
-                            }
+                            onClicked: dock.press(modelData)
                         }
                     }
                 }

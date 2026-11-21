@@ -125,8 +125,17 @@ def checks():
     ssh = run(["systemctl", "is-active", "sshd"]).strip() == "active" or run(["systemctl", "is-active", "ssh"]).strip() == "active"
     add("ssh", "SSH server", not ssh, "Off" if not ssh else "On: other computers can log in to this one",
         "" if not ssh else "sudo systemctl disable --now sshd")
-    add("ports", "Open to the network", len(ports) <= 3, "Nothing listens to the network" if not ports else
-        ("%d: %s" % (len(ports), ", ".join(ports[:6]) + (" ..." if len(ports) > 6 else ""))))
+    # wildcard listeners (0.0.0.0, [::]) are only exposed when nothing filters them: with a firewall on, they are
+    # services on this computer, not an open door (mDNS, CUPS and the like made this red on every normal desktop)
+    if not ports:
+        add("ports", "Open to the network", True, "Nothing listens to the network")
+    elif fw:
+        add("ports", "Open to the network", True,
+            "%d service%s listen on all interfaces (%s%s); %s blocks them from other computers"
+            % (len(ports), "" if len(ports) == 1 else "s", ", ".join(ports[:6]), " ..." if len(ports) > 6 else "", fw))
+    else:
+        add("ports", "Open to the network", len(ports) <= 3, "Nothing listens to the network" if not ports else
+            ("%d: %s" % (len(ports), ", ".join(ports[:6]) + (" ..." if len(ports) > 6 else ""))))
     pt = sysctl("kernel.yama.ptrace_scope")
     add("ptrace", "Programs spying on programs", pt not in (None, "0"), "Restricted" if pt not in (None, "0") else "Any of your programs can read another one's memory (see Experimental below)")
     enc = "crypt" in run(["lsblk", "-no", "TYPE"])
@@ -338,14 +347,24 @@ def cmd_quarantine():
         src = it["path"]
         if not os.path.isfile(src) or os.path.islink(src):
             continue
-        name = "%d-%s" % (int(time.time() * 1000) % 10**10, os.path.basename(src))
+        try:
+            mode = os.stat(src).st_mode & 0o7777        # give it back the way it was (cmd_restore)
+        except OSError:
+            mode = 0o600
+        name = "%d-%s" % (int(time.time() * 1000), os.path.basename(src))
         dst = os.path.join(QDIR, name)
+        k = 1
+        while os.path.exists(dst) or os.path.exists(dst + ".json"):
+            k += 1                                       # two index.js in the same millisecond: a second name
+            dst = os.path.join(QDIR, "%s-%d" % (name, k))
+        name = os.path.basename(dst)
         try:
             shutil.move(src, dst)
             os.chmod(dst, 0o000)
         except Exception:
             continue
-        json.dump({"name": name, "from": src, "virus": it["name"], "when": int(time.time())}, open(dst + ".json", "w"))
+        json.dump({"name": name, "from": src, "virus": it["name"], "when": int(time.time()), "mode": mode},
+                  open(dst + ".json", "w"))
         n += 1
     try:
         d = json.load(open(PROG))
@@ -363,9 +382,12 @@ def cmd_restore(name):
     except Exception:
         sys.exit("not in quarantine")
     src = os.path.join(QDIR, m["name"])
-    os.chmod(src, 0o600)
     os.makedirs(os.path.dirname(m["from"]), exist_ok=True)
     shutil.move(src, m["from"])
+    try:
+        os.chmod(m["from"], int(m.get("mode") or 0o600))   # the mode it had before it went to quarantine
+    except OSError:
+        pass
     os.remove(meta)
 
 

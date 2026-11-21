@@ -14,6 +14,8 @@ Item {
     property string q: ""
     function idOf(e) { return (e.id || "").replace(/\.desktop$/, "") }
     function entry(id) { return DesktopEntries.heuristicLookup(id) }
+    function entryName(id) { const e = page.entry(id); return e && e.name ? e.name : id }
+    function entryIcon(id) { const e = page.entry(id); return e && e.icon ? e.icon : "application-x-executable" }
     function setPins(l) {
         const d = JSON.parse(JSON.stringify(page.ctl.dst)); d.dock = d.dock || {}; d.dock.apps = l; page.ctl.dst = d
         Quickshell.execDetached(["bash", "-c", "\"$HOME/.local/bin/desktop-set\" dock-apps \"$1\"", "_", JSON.stringify(l)])
@@ -22,10 +24,14 @@ Item {
     function pin(id) { if (pins.indexOf(id) < 0) setPins(pins.concat([id])) }
     function unpin(id) { setPins(pins.filter(function(x) { return x !== id })) }
     function move(i, d) { const l = pins.slice(); const j = i + d; if (j < 0 || j >= l.length) return; const t = l[i]; l[i] = l[j]; l[j] = t; setPins(l) }
+    // plain rows: a DesktopEntry kept in the list goes dead when the desktop files reload, and reading it
+    // later segfaults (Quickshell #21)
     readonly property var found: {
         const s = q.trim().toLowerCase()
         const l = DesktopEntries.applications.values.filter(function(e) { return !e.noDisplay && (s === "" || (e.name || "").toLowerCase().indexOf(s) >= 0) })
-        return l.slice().sort(function(a, b) { return (a.name || "").localeCompare(b.name || "") }).slice(0, 48)
+        return l.slice().sort(function(a, b) { return (a.name || "").localeCompare(b.name || "") }).slice(0, 48).map(function(e) {
+            return { id: page.idOf(e), name: e.name || "", icon: e.icon || "" }
+        })
     }
 
     function lv(k) {
@@ -207,7 +213,8 @@ Item {
                     model: page.pins
                     delegate: Rectangle {
                         id: chip
-                        readonly property var e: page.entry(modelData)
+                        readonly property string ename: page.entryName(modelData)
+                        readonly property string eicon: page.entryIcon(modelData)
                         readonly property int pi: index
                         readonly property string pid: modelData
                         height: 52; width: pr.implicitWidth + 24; radius: 26
@@ -218,8 +225,8 @@ Item {
                             spacing: 6
                             Item { width: 34; height: 34; anchors.verticalCenter: parent.verticalCenter
                                 Blob { anchors.fill: parent; kind: Prefs.accentShape; color: M3.alpha(M3.primary, 0.25) }
-                                Image { anchors.centerIn: parent; width: 24; height: 24; sourceSize.width: 48; sourceSize.height: 48; source: Icons.get(chip.e ? (chip.e.icon || "application-x-executable") : chip.pid, "application-x-executable") } }
-                            T { text: chip.e ? chip.e.name : chip.pid; font.pixelSize: 13; color: M3.inkSecondaryC; anchors.verticalCenter: parent.verticalCenter }
+                                Image { anchors.centerIn: parent; width: 24; height: 24; sourceSize.width: 48; sourceSize.height: 48; source: Icons.get(chip.eicon, "application-x-executable") } }
+                            T { text: chip.ename; font.pixelSize: 13; color: M3.inkSecondaryC; anchors.verticalCenter: parent.verticalCenter }
                             Repeater {
                                 model: [{ s: "chevron_left", g: "‹", d: -1 }, { s: "chevron_right", g: "›", d: 1 }, { s: "close", g: "×", d: 0 }]
                                 delegate: Rectangle {
@@ -245,7 +252,7 @@ Item {
                 Repeater {
                     model: page.found
                     delegate: Rectangle {
-                        readonly property string aid: page.idOf(modelData)
+                        readonly property string aid: modelData.id
                         readonly property bool on: page.pins.indexOf(aid) >= 0
                         width: ar.implicitWidth + 24; height: 44; radius: on ? 22 : 12
                         color: on ? M3.primary : (am.containsMouse ? M3.surfaceHigh : M3.surfaceC)

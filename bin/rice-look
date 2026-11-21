@@ -673,7 +673,9 @@ def files_installed(f):
 
 
 def current_files(c):
-    t = read(FILESFILE).strip() or c["files"]
+    # the choice in hypr.json comes first: ~/.config/rice/files is its echo, and an old echo used to win over a
+    # choice just made in Settings (SUPER + E kept opening the previous file manager)
+    t = c["files"] or read(FILESFILE).strip()
     for f in FILES:
         if f["id"] == t and files_installed(f):
             return t
@@ -1032,8 +1034,11 @@ def main(a):
             sys.exit("%s is not installed" % f["name"])
         c["files"] = a[2]
         save(c)
-        apply_files_choice(c)
+        got = apply_files_choice(c)
         apply_files_theme(c)
+        if got != a[2]:
+            sys.exit("Could not switch to %s (it was not found); still using %s"
+                     % (f["name"], next((x["name"] for x in FILES if x["id"] == got), "the previous one")))
         print("Files open in %s" % f["name"])
     elif cmd == "files-colors" and len(a) == 3 and a[2] in ("on", "off"):
         c["files_colors"] = a[2] == "on"

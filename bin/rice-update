@@ -315,6 +315,28 @@ def alive(pid):
         return False
 
 
+def ours(pid, started):
+    """is PID still the update we started at STARTED? A live PID alone is not enough: after a crash the number can
+    belong to something else, and the Update Center would say "already updating" for ever"""
+    if not alive(pid):
+        return False
+    try:
+        age = time.time() - float(started)
+    except (TypeError, ValueError):
+        age = 1e9
+    if age < 0 or age > 3600:          # an update takes minutes; an hour is long dead
+        return False
+    try:
+        with open("/proc/%d/stat" % int(pid)) as f:
+            # the command has "(name)" with spaces in it: split after the last ")"
+            parts = f.read().rsplit(")", 1)[-1].split()
+        born = int(parts[19]) / os.sysconf("SC_CLK_TCK")
+        boot = time.time() - float(open("/proc/uptime").read().split()[0])
+        return abs(boot + born - float(started)) < 120        # not a reused number: the same second we started it
+    except Exception:
+        return True                   # no /proc (another OS): trust the age alone
+
+
 def put_live(**kw):
     os.makedirs(CACHE, exist_ok=True)
     tmp = LIVE + ".new"
@@ -335,7 +357,7 @@ def gui(args):
         print("already updating")
         return 0
     st = live()
-    if st.get("state") == "running" and alive(st.get("pid")):
+    if st.get("state") == "running" and ours(st.get("pid"), st.get("started")):
         print("already updating")
         return 0
     r = repo()

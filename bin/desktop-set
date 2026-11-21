@@ -173,7 +173,8 @@ def lock_conf(c):
         if "rice-lock.conf" not in s:
             if not os.path.exists(HYPRLOCK + ".bak-rice"):
                 open(HYPRLOCK + ".bak-rice", "w").write(s)
-            open(HYPRLOCK, "w").write(s.rstrip() + "\n\n" + SOURCE_LINE + "\n")
+            open(HYPRLOCK + ".tmp", "w").write(s.rstrip() + "\n\n" + SOURCE_LINE + "\n")
+            os.replace(HYPRLOCK + ".tmp", HYPRLOCK)
     except FileNotFoundError:
         pass
 

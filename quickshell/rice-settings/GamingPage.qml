@@ -57,7 +57,7 @@ Item {
             const e = DesktopEntries.heuristicLookup(launchers[i].id)
             if (!e || seen[e.name]) continue
             seen[e.name] = true
-            out.push({ e: e, n: e.name })
+            out.push({ id: e.id || launchers[i].id, n: e.name, icon: e.icon || "" })
         }
         return out
     }
@@ -197,14 +197,18 @@ Item {
                     Image {
                         anchors.horizontalCenter: parent.horizontalCenter; y: 18
                         width: 44; height: 44; sourceSize.width: 88; sourceSize.height: 88
-                        source: Icons.get(modelData.e.icon || "applications-games", true)
+                        source: Icons.get(modelData.icon || "applications-games", true)
                         scale: lm.containsMouse ? 1.1 : 1
                         Behavior on scale { NumberAnimation { duration: M3.d(420); easing.type: Easing.OutBack; easing.overshoot: 1.4 * Prefs.bounce } }
                     }
                     T { anchors.horizontalCenter: parent.horizontalCenter; y: 74; width: parent.width - 16; horizontalAlignment: Text.AlignHCenter
                         elide: Text.ElideRight; text: modelData.n; font.pixelSize: 13; font.weight: Font.Medium }
                     MouseArea { id: lm; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                        onClicked: { modelData.e.execute(); page.ctl.status = I18n.t("Opening ") + modelData.n } }
+                        onClicked: {
+                            const e = DesktopEntries.heuristicLookup(modelData.id)
+                            if (e) e.execute()
+                            page.ctl.status = I18n.t("Opening ") + modelData.n
+                        } }
                 }
             }
         }
