@@ -4,6 +4,7 @@
 #   rice-sddm state          JSON: is SDDM installed, is the theme in, is it the one in use, which display manager runs
 #   rice-sddm install        put the theme in and make it SDDM's theme (asks for your password)
 #   rice-sddm use-sddm       also make SDDM the display manager that starts at boot (asks for your password)
+#   rice-sddm setup [use-sddm]  install SDDM's package when it is missing, then the theme (the installer runs it)
 #   rice-sddm remove         SDDM goes back to its own theme (asks for your password)
 #   rice-sddm sync           your wallpaper, colors, font and picture to the login screen (no password; it runs by
 #                            itself when the wallpaper changes)
@@ -47,7 +48,8 @@ sudo_run() {
   else sudo "$@"; fi
 }
 pkg_cmd() {
-  . /etc/os-release 2>/dev/null
+  # shellcheck disable=SC1090  # the distro's own file (the tests point OS_RELEASE at a fixture)
+  . "${OS_RELEASE:-/etc/os-release}" 2>/dev/null
   case " ${ID:-} ${ID_LIKE:-} " in
     *" artix "*) echo "sudo pacman -S --needed sddm sddm-\$(rice-sys init) qt6-svg qt6-declarative" ;;
     *" arch "*|*" cachyos "*|*" endeavouros "*|*" manjaro "*) echo "sudo pacman -S --needed sddm qt6-svg qt6-declarative" ;;
@@ -131,6 +133,31 @@ install() {
   have_sddm || echo "SDDM is not installed yet: $(pkg_cmd)"
   sudo_run "$(readlink -f "$0")" root-install "$r/sddm/$NAME" "$(id -un)" ${1:-} || exit 1
   sync
+}
+
+pkg_install() {   # SDDM and the Qt modules the theme needs, fetched without a question (the installer calls it)
+  local c; c="$(pkg_cmd)"
+  case "$c" in
+    "sudo "*) c="${c#sudo }" ;;
+    # NixOS (configuration.nix) and a distro this file does not know: there is no command to run
+    *) echo "SDDM: $c"; return 1 ;;
+  esac
+  case "$c" in
+    *"pacman -S --needed"*) c="${c/--needed/--needed --noconfirm}" ;;
+    *"dnf install"*)   c="${c/dnf install/dnf install -y}" ;;
+    *"apt install"*)   c="${c/apt install/apt-get install -y}" ;;
+    *"zypper install"*) c="${c/zypper install/zypper install -y}" ;;
+  esac
+  sudo_run bash -c "$c"
+}
+
+setup() {   # setup [use-sddm]: the package first when SDDM is missing, then the theme (and SDDM at boot if asked)
+  if ! have_sddm; then
+    pkg_install || exit 1
+    hash -r 2>/dev/null
+    have_sddm || { echo "SDDM was installed but is not on PATH: install it by hand and run rice-sddm install"; exit 1; }
+  fi
+  install "${1:-}"
 }
 
 # the picture of your wallpaper now (for a live wallpaper: one frame of it)
@@ -248,6 +275,7 @@ case "${1:-state}" in
   state) state ;;
   install) install ;;
   use-sddm) install use-sddm ;;
+  setup) shift; setup "${1:-}" ;;
   remove) sudo_run "$(readlink -f "$0")" root-remove ;;
   sync) sync ;;
   clock)   # clock STYLE: classic|stacked|center|pill|shapes
@@ -260,5 +288,5 @@ case "${1:-state}" in
   preview) preview ;;
   root-install) shift; root_install "$@" ;;
   root-remove) root_remove ;;
-  *) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

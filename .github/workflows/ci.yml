@@ -20,5 +20,8 @@ jobs:
       - name: Security checks
         run: |
           bash tests/security.sh
+      - name: SDDM package command
+        run: |
+          bash tests/sddm.sh
       - name: Installer dry run
         run: SHADOWS_ALLOW_ROOT=1 ./install.sh --yes --dry-run

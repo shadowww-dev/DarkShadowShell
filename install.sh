@@ -1059,13 +1059,36 @@ step_finish() {
       task "niri config (written again for your niri when it first starts)" t "$BIN/rice-niri" apply
     fi
   fi
-  # the login screen (SDDM): it follows your wallpaper; a fresh install asks whether to use it
+  # the login screen (SDDM): with no login manager at all the installer puts SDDM and the shell's theme in, at boot
+  # too; with another manager it asks and leaves that one at boot; SDDM with the theme already there only follows
+  # your wallpaper
   if [ -x "$BIN/rice-sddm" ] && [ "$DRY_RUN" != 1 ]; then
     if [ -w /usr/share/sddm/themes/darkshadow-shell/user ]; then
       task "Login screen (SDDM): your wallpaper and colors" t "$BIN/rice-sddm" sync
-    elif [ "$MODE" != update ] && [ "$ASSUME_YES" != 1 ] && command -v sddm >/dev/null 2>&1 && [ ! -e /etc/NIXOS ] \
-         && confirm "Use the shell's login screen for SDDM? (it asks for your password)"; then
-      "$BIN/rice-sddm" install || warn "The login screen was not put in (Settings > Desktop > Idle & Lockscreen can do it later)"
+    elif [ "$MODE" = update ]; then
+      note "Login screen: the theme changed with this version; Settings > Desktop > Idle & Lockscreen puts it in"
+    elif [ -e /etc/NIXOS ]; then
+      note "NixOS: programs.shadows-shell.sddm = true; in configuration.nix puts the login screen in"
+    elif [ "$SKIP_PKGS" = 1 ]; then
+      note "Login screen: --no-packages, so SDDM was not installed (rice-sddm setup does it)"
+    elif command -v sddm >/dev/null 2>&1; then
+      if confirm "Use the shell's login screen for SDDM? (it asks for your password)"; then
+        "$BIN/rice-sddm" install ||
+          warn "The login screen was not put in (Settings > Desktop > Idle & Lockscreen can do it later)"
+      fi
+    else
+      # which login manager starts now: none (a text console) or another one (gdm, lightdm)
+      local dm
+      dm="$("$BIN/rice-sddm" state 2>/dev/null | sed -n 's/.*"dm": "\([^"]*\)".*/\1/p')"
+      if [ -z "$dm" ]; then
+        info "Login screen: there is none yet, so SDDM is installed with the shell's theme"
+        "$BIN/rice-sddm" setup use-sddm ||
+          warn "SDDM was not installed (Settings > Desktop > Idle & Lockscreen can do it later)"
+      elif confirm "Your login manager is $dm. Install SDDM with the shell's theme too? (SDDM stays off at boot)"; then
+        "$BIN/rice-sddm" setup ||
+          warn "SDDM was not installed (Settings > Desktop > Idle & Lockscreen can do it later)"
+        note "SDDM does not replace $dm at boot: rice-sddm use-sddm makes it the login screen"
+      fi
     fi
   fi
   # Settings > Security > Shell files: the files are watched from here on (after every install and update)
