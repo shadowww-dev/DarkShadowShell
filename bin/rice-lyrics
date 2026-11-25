@@ -2,6 +2,7 @@
 """rice-lyrics ARTIST TITLE [ALBUM] [SECONDS]
 Lyrics for the Lyrics widget, from LRCLIB (lrclib.net, free and open, no account). Prints JSON:
 {"synced": [[seconds, "line"], ...], "plain": "text", "found": true|false}
+("error": true: LRCLIB could not be asked, so the song may still have lyrics)
 Answers are kept in ~/.cache/rice/lyrics, so a song is asked for only once.
 
 Asking LRCLIB sends the artist and the title of what you are playing to a third party, which is a listening log
@@ -14,6 +15,8 @@ import json
 import os
 import re
 import sys
+import unicodedata
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -48,13 +51,61 @@ def set_enabled(on):
     os.replace(tmp, CFG)
 
 
-def get(url):
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
+def get(path, q):
+    """the answer, None when LRCLIB has nothing; raises OSError or ValueError when it could not be asked"""
+    req = urllib.request.Request("https://lrclib.net/api/" + path + "?" + urllib.parse.urlencode(q), headers={"User-Agent": UA})
     try:
         with urllib.request.urlopen(req, timeout=8) as r:
             return json.load(r)
-    except Exception:
-        return None
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        raise
+
+
+def norm(s):
+    s = unicodedata.normalize("NFKD", s.lower().replace("ł", "l"))
+    return " ".join(re.findall(r"\w+", "".join(c for c in s if not unicodedata.combining(c))))
+
+
+# what YouTube adds to a title: "(Official Video)", "[Lyrics]", "(prod. X)", "(feat. Y)"
+EXTRA = re.compile(r"\s*[\(\[][^\)\]]*\b(official|video|audio|lyrics?|hd|4k|visuali[sz]er|teledysk|prod|feat|ft)\b[^\)\]]*[\)\]]", re.I)
+
+
+def clean(title):
+    t = EXTRA.sub("", title)
+    t = re.sub(r"\s+(feat|ft|prod)\b\.?.*$", "", t, flags=re.I)
+    return t.strip(" -–—|") or title.strip()
+
+
+def names(artist, title, album):
+    """(artist, title) pairs to try, the likeliest first. On YouTube (no album) the title is often "Artist - Song"
+    and the artist is the channel; with an album the player knows the artist and "Song - Remastered" is one title"""
+    artist = re.sub(r"(\s*-\s*Topic|\s*VEVO)$", "", artist, flags=re.I).strip()
+    base = title.split("|")[0].strip() or title
+    plain = [(artist, clean(base))]
+    m = re.match(r"(.+?)\s+[-–—]\s+(.+)$", base)
+    if not m:
+        out = plain
+    elif album:
+        out = plain + [(artist, clean(m.group(1)))]
+    else:
+        out = [(m.group(1).strip(), clean(m.group(2)))] + plain
+    return [x for i, x in enumerate(out) if x[1] and x not in out[:i]]
+
+
+def best(res, artist, title, dur):
+    """the answer that is this song: the same title, the artist when there is one, the nearest length"""
+    t, art = norm(title), set(norm(artist).split())
+    ok = []
+    for r in res if isinstance(res, list) else []:
+        if not (r.get("syncedLyrics") or r.get("plainLyrics")):
+            continue
+        rt, ra = norm(clean(r.get("trackName") or "")), set(norm(r.get("artistName") or "").split())
+        if rt != t or (art and not (art & ra)):
+            continue
+        ok.append((not r.get("syncedLyrics"), abs((r.get("duration") or 0) - dur) if dur else 0, len(ok), r))
+    return min(ok)[3] if ok else None
 
 
 def parse(lrc):
@@ -81,10 +132,11 @@ def main(a):
     artist, title = a[1].strip(), a[2].strip()
     album = a[3].strip() if len(a) > 3 else ""
     dur = a[4] if len(a) > 4 else ""
-    # "Song (Official Video)" and "Artist - Topic" from YouTube: the plain names find more
-    title = re.sub(r"\s*[\(\[][^\)\]]*(official|video|audio|lyrics?|hd|4k|visuali[sz]er)[^\)\]]*[\)\]]", "", title, flags=re.I).strip()
-    artist = re.sub(r"\s*-\s*Topic$", "", artist).strip()
-    key = hashlib.sha1(("%s|%s" % (artist.lower(), title.lower())).encode()).hexdigest()
+    try:
+        secs = int(float(dur)) if dur and float(dur) > 0 else 0
+    except (ValueError, OverflowError):
+        secs = 0
+    key = hashlib.sha1(("2|%s|%s|%d" % (artist.lower(), title.lower(), secs)).encode()).hexdigest()
     os.makedirs(CACHE, exist_ok=True)
     cf = os.path.join(CACHE, key + ".json")
     if os.path.exists(cf):
@@ -93,31 +145,36 @@ def main(a):
     if not enabled():
         print(json.dumps({"synced": [], "plain": "", "found": False, "off": True}))
         return
-    base = "https://lrclib.net/api/"
-    q = {"artist_name": artist, "track_name": title}
-    if album:
-        q["album_name"] = album
+    j, error = None, False
     try:
-        if dur and float(dur) > 0:
-            q["duration"] = str(int(float(dur)))
-    except ValueError:
-        pass
-    j = get(base + "get?" + urllib.parse.urlencode(q)) if artist else None
-    if not j or not (j.get("syncedLyrics") or j.get("plainLyrics")):
-        res = get(base + "search?" + urllib.parse.urlencode({"q": (artist + " " + title).strip()}))
-        j = None
-        if isinstance(res, list):
-            for r in res:
-                if r.get("syncedLyrics"):
-                    j = r
+        for art, tit in names(artist, title, album):
+            if art and secs:
+                q = {"artist_name": art, "track_name": tit, "duration": str(secs)}
+                if album:
+                    q["album_name"] = album
+                j = get("get", q)
+                if j and (j.get("syncedLyrics") or j.get("plainLyrics")):
                     break
-            if j is None and res:
-                j = res[0]
+            q = {"track_name": tit}
+            if art:
+                q["artist_name"] = art
+            # no artist: the song can be anyone's, so the length has to fit
+            j = best(get("search", q), art, tit, secs)
+            if j and not art and not (secs and abs((j.get("duration") or 0) - secs) <= 5):
+                j = None
+            if j:
+                break
+    except (OSError, ValueError):
+        j, error = None, True
     out = {"synced": parse(j.get("syncedLyrics")) if j else [], "plain": (j.get("plainLyrics") or "") if j else "",
            "found": bool(j and (j.get("syncedLyrics") or j.get("plainLyrics")))}
+    if error:
+        out["error"] = True
     s = json.dumps(out, ensure_ascii=False)
-    if j is not None or out["found"]:
-        open(cf, "w").write(s)
+    if out["found"]:
+        with open(cf + ".tmp", "w") as f:
+            f.write(s)
+        os.replace(cf + ".tmp", cf)
     print(s)
 
 

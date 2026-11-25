@@ -18,12 +18,18 @@ Item {
     property bool loading: false
     property string songKey: ""
     readonly property string want: Player.has ? Player.artist + "|" + Player.title : ""
-    onWantChanged: lookT.restart()
+    onWantChanged: { tries = 0; againT.stop(); lookT.restart() }
     Timer { id: lookT; interval: 600; onTriggered: ly.look() }
+    // LRCLIB could not be asked: again a little later, a few times
+    property int tries: 0
+    Timer { id: againT; interval: 10000; onTriggered: { ly.songKey = ""; ly.look() } }
     function look() {
-        if (want === songKey) return
-        songKey = want; lines = []; plain = ""
-        if (!Player.has || !running) return
+        // hidden, or still busy with the song before: asked when it shows again or that answer is in. The song is
+        // only marked as looked up once it really is (a song that started while hidden never got its lyrics)
+        if (!running || fetch.running || want === songKey) return
+        againT.stop()
+        songKey = want; lines = []; plain = ""; loading = false
+        if (!Player.has) return
         loading = true
         fetch.command = [Quickshell.env("HOME") + "/.local/bin/rice-lyrics", Player.artist, Player.title, Player.album, String(Math.round(Player.length))]
         fetch.running = true
@@ -34,9 +40,15 @@ Item {
         stdout: StdioCollector {
             onStreamFinished: {
                 ly.loading = false
-                try { const j = JSON.parse(text); ly.lines = j.synced || []; ly.plain = j.plain || ""; ly.lyOff = j.off === true } catch (e) { }
+                if (ly.songKey !== ly.want) return      // another song by now: onExited asks for that one
+                try {
+                    const j = JSON.parse(text)
+                    ly.lines = j.synced || []; ly.plain = j.plain || ""; ly.lyOff = j.off === true
+                    if (j.error === true && ly.tries < 3) { ly.tries++; againT.restart() }
+                } catch (e) { }
             }
         }
+        onExited: lookT.restart()
     }
     // the line being sung
     readonly property int cur: {
