@@ -21,22 +21,29 @@ PanelWindow {
 
     // ---------- settings (~/.config/rice/bar.json, the same file as the top bar) ----------
     property var bc: ({})
-    property string cfgText: ""
+    property string cfgText: "\u0000"
+    property bool cfgLoaded: false
     readonly property string home: Quickshell.env("HOME")
     Trigger {
         path: vb.home + "/.config/rice/bar.json"
         every: 2000
         onContent: function(t) {
             const x = t.trim()
-            if (x === vb.cfgText) return
-            vb.cfgText = x
-            try { vb.bc = x === "" ? ({}) : JSON.parse(x) } catch (e) { }
+            if (x !== vb.cfgText) {
+                vb.cfgText = x
+                try { vb.bc = x === "" ? ({}) : JSON.parse(x) } catch (e) { }
+            }
+            if (!vb.cfgLoaded) vb.cfgLoaded = true
         }
     }
     // the edge it sits on now. A move to the other edge (or a new style) plays out: it slides away, changes, slides back
     readonly property bool wantRight: bc.position === "right"
     property bool atRight: false
     readonly property bool on: bc.enabled !== false && (bc.position === "left" || bc.position === "right")
+    readonly property bool hideOn: bc.autohide === true
+    property bool peek: false
+    readonly property bool shownBar: on && (!hideOn || peek) && !Infinite.hideUi
+    Timer { id: leaveT; interval: 700; onTriggered: vb.peek = false }
     // styles, like the top bar: flat (the whole edge), island (one pill), islands (a pill for each zone: top, middle,
     // bottom), pills (a pill for each module), dynamic (islands in the Material colors of your theme). notch has no
     // edge to grow out of standing up: islands
@@ -70,9 +77,9 @@ PanelWindow {
     property real t: 0
     readonly property real et: 1 - Math.pow(1 - t, 3)
     property bool ready: false
-    Behavior on t { enabled: vb.ready && !moveAnim.running; NumberAnimation { duration: vb.on ? 460 : 220; easing.type: Easing.Linear } }
-    onOnChanged: t = on ? 1 : 0
-    Timer { running: true; interval: 1200; onTriggered: { vb.atRight = vb.wantRight; vb.sty = vb.want; vb.ready = true; vb.t = vb.on ? 1 : 0 } }
+    Behavior on t { enabled: vb.ready && !moveAnim.running; NumberAnimation { duration: vb.shownBar ? 320 : 220; easing.type: Easing.Linear } }
+    onShownBarChanged: t = shownBar ? 1 : 0
+    Timer { running: true; interval: 1200; onTriggered: { vb.atRight = vb.wantRight; vb.sty = vb.want; vb.ready = true; vb.t = vb.shownBar ? 1 : 0 } }
     onWantRightChanged: if (ready && wantRight !== atRight) moveAnim.restart()
     onWantChanged: if (ready && want !== sty) moveAnim.restart()
     SequentialAnimation {
@@ -80,7 +87,7 @@ PanelWindow {
         NumberAnimation { target: vb; property: "t"; to: 0; duration: 200; easing.type: Easing.Linear }
         ScriptAction { script: { vb.atRight = vb.wantRight; vb.sty = vb.want } }
         PauseAnimation { duration: 40 }
-        NumberAnimation { target: vb; property: "t"; to: vb.on ? 1 : 0; duration: 460; easing.type: Easing.Linear }
+        NumberAnimation { target: vb; property: "t"; to: vb.shownBar ? 1 : 0; duration: 360; easing.type: Easing.Linear }
     }
 
     // ---------- the launcher logo: your distro (Nerd Font), the app grid, the black hole or the moon ----------
@@ -122,18 +129,52 @@ PanelWindow {
     }
 
     // ---------- the window ----------
-    visible: on || t > 0.01
+    visible: cfgLoaded && (on || t > 0.01)
     color: "transparent"
     anchors { top: true; bottom: true; left: !atRight; right: atRight }
     implicitWidth: barW + gap * 2
-    exclusionMode: ExclusionMode.Normal
-    exclusiveZone: on ? barW + gap * 2 : 0
+    readonly property bool reserveZone: cfgLoaded && on && !hideOn
+    readonly property int wantZone: reserveZone ? barW + gap * 2 : 0
+    exclusionMode: ExclusionMode.Ignore
+    function syncExclusion() {
+        if (reserveZone) {
+            exclusiveZone = wantZone
+            exclusionMode = ExclusionMode.Normal
+        } else {
+            exclusiveZone = 0
+            exclusionMode = ExclusionMode.Ignore
+        }
+    }
+    onReserveZoneChanged: syncExclusion()
+    onWantZoneChanged: if (reserveZone) syncExclusion()
+    onVisibleChanged: if (visible) syncExclusion()
+    Component.onCompleted: syncExclusion()
+    mask: Region { item: !vb.on ? hitNone : (vb.shownBar ? hitBar : hitStrip) }
+    Item { id: hitBar; anchors.fill: parent }
+    Item { id: hitNone; width: 0; height: 0 }
+    Item {
+        id: hitStrip
+        width: 5; height: parent.height; x: vb.atRight ? parent.width - width : 0
+        Rectangle { anchors.fill: parent; visible: vb.on && vb.hideOn && !vb.shownBar; color: Qt.rgba(0, 0, 0, 0.004) }
+        MouseArea {
+            anchors.fill: parent
+            enabled: vb.on && vb.hideOn && !vb.shownBar
+            hoverEnabled: true
+            acceptedButtons: Qt.NoButton
+            onEntered: { leaveT.stop(); vb.peek = true }
+            onPositionChanged: { leaveT.stop(); vb.peek = true }
+        }
+    }
+    HoverHandler {
+        enabled: vb.hideOn
+        onHoveredChanged: { if (hovered) { leaveT.stop(); vb.peek = true } else leaveT.restart() }
+    }
     WlrLayershell.layer: WlrLayer.Top
     WlrLayershell.namespace: "rice-bar"
     // niri: blur behind every background of the bar (Hyprland: a layer rule). Only once it has slid into place
     property var pillBgs: []
     readonly property var blurItems: flat || sty === "island" ? [panel] : (pills ? pillBgs.slice(0, 8) : [zTop.bgItem, zMid.bgItem, zBot.bgItem])
-    NiriBlur { win: vb; items: vb.blurItems; radius: Look.sq ? 0 : (vb.flat ? 0 : vb.barW / 2); on: vb.on && vb.t > 0.98 && !moveAnim.running }
+    NiriBlur { win: vb; items: vb.blurItems; radius: Look.sq ? 0 : (vb.flat ? 0 : vb.barW / 2); on: vb.shownBar && vb.t > 0.98 && !moveAnim.running }
 
     // the tray, without the network and Bluetooth applets when the bar shows Wi-Fi and Bluetooth itself (niri and
     // some distros start nm-applet and blueman on their own: a second, odd Wi-Fi icon)

@@ -158,7 +158,8 @@ PanelWindow {
     readonly property real alpha: Look.flat ? 1 : (bc.opacity !== undefined ? bc.opacity : 0.72)
     readonly property color bg: Look.sq ? gp.minSurface : (goo ? gp.surface : Qt.rgba(0.05, 0.05, 0.05, alpha))
     readonly property real gap: hug ? 3 : (floating ? 8 : 0)
-    property string cfgText: ""
+    property string cfgText: "\u0000"
+    property bool cfgLoaded: false
     readonly property string home: Quickshell.env("HOME")
 
     Trigger {
@@ -166,20 +167,39 @@ PanelWindow {
         every: 2000
         onContent: function(t) {
             const x = t.trim()
-            if (x === bar.cfgText) return
-            bar.cfgText = x
-            try { bar.bc = x === "" ? ({}) : JSON.parse(x) } catch (e) { }
+            if (x !== bar.cfgText) {
+                bar.cfgText = x
+                try { bar.bc = x === "" ? ({}) : JSON.parse(x) } catch (e) { }
+            }
+            if (!bar.cfgLoaded) bar.cfgLoaded = true
         }
     }
 
     // ---------- the window ----------
-    visible: on || ghostOnly || barK > 0.01
+    // Do not map until bar.json has loaded: otherwise PanelWindow starts with autohide=false and reserves an
+    // exclusive zone on Hyprland before settings are read. Also avoid binding exclusiveZone alongside exclusionMode,
+    // because setting exclusiveZone in Quickshell resets exclusionMode back to ExclusionMode.Normal.
+    visible: cfgLoaded && (on || ghostOnly || barK > 0.01)
     color: "transparent"
     anchors { top: !atBottom; bottom: atBottom; left: true; right: true }
     // room below for the recording island; windows only keep away from the bar itself
     implicitHeight: barH + gap * 2 + 460      // room for the island's cards (the bar lets the pointer through there)
-    exclusionMode: hideOn || !on ? ExclusionMode.Ignore : ExclusionMode.Normal
-    exclusiveZone: hideOn || !on ? 0 : barH + gap * 2
+    readonly property bool reserveZone: cfgLoaded && on && !hideOn
+    readonly property int wantZone: reserveZone ? barH + gap * 2 : 0
+    exclusionMode: ExclusionMode.Ignore
+    function syncExclusion() {
+        if (reserveZone) {
+            exclusiveZone = wantZone
+            exclusionMode = ExclusionMode.Normal
+        } else {
+            exclusiveZone = 0
+            exclusionMode = ExclusionMode.Ignore
+        }
+    }
+    onReserveZoneChanged: syncExclusion()
+    onWantZoneChanged: if (reserveZone) syncExclusion()
+    onVisibleChanged: if (visible) syncExclusion()
+    Component.onCompleted: syncExclusion()
     // only the bar (and the recording island) take the pointer; auto-hide: only a thin strip at the edge
     mask: Region { item: !bar.on ? hitNone : (bar.shownBar ? hitBar : hitStrip); Region { item: hitRec } Region { item: hitIsl } Region { item: hitMenu } Region { item: hitPop } }
     Item { id: hitMenu; x: bar.gap + trayMenu.x; y: body.y + trayMenu.y; width: trayMenu.visible ? trayMenu.width : 0; height: trayMenu.height }
@@ -196,7 +216,20 @@ PanelWindow {
     Item { id: hitRec; x: recIsland.x + bar.gap; width: recIsland.width; height: bar.recOn && bar.shownBar ? 54 : 0; y: bar.atBottom ? 0 : bar.barH + bar.gap * 2 }
     Item { id: hitAll; anchors.fill: parent }
     Item { id: hitNone; width: 0; height: 0 }
-    Item { id: hitStrip; width: parent.width; height: 3; y: bar.atBottom ? parent.height - 3 : 0 }
+    Item {
+        id: hitStrip
+        width: parent.width; height: 5; y: bar.atBottom ? parent.height - height : 0
+        // faint hit surface while auto-hidden so compositors always deliver pointer enter on the edge strip
+        Rectangle { anchors.fill: parent; visible: bar.on && bar.hideOn && !bar.shownBar; color: Qt.rgba(0, 0, 0, 0.004) }
+        MouseArea {
+            anchors.fill: parent
+            enabled: bar.on && bar.hideOn && !bar.shownBar
+            hoverEnabled: true
+            acceptedButtons: Qt.NoButton
+            onEntered: { leaveT.stop(); bar.peek = true }
+            onPositionChanged: { leaveT.stop(); bar.peek = true }
+        }
+    }
     // niri: blur behind the bar's backgrounds, the island, its card and the tray menu (Hyprland: a layer rule).
     // These follow the island and its card in window coordinates, so the blur moves with them.
     Item { id: blurIsl; x: bar.gap + isl.x; y: body.y + isl.y; width: isl.ghost || !isl.visible ? 0 : isl.width; height: isl.height }
