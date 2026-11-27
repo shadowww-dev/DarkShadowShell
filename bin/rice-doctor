@@ -63,7 +63,7 @@ shell_report() {
   command -v Hyprland >/dev/null && printf '  %s\n' "$(Hyprland --version 2>/dev/null | head -1)"
   command -v qs >/dev/null && printf '  %s\n' "$(qs --version 2>/dev/null | head -1)"
   printf '  session: %s\n' "${XDG_SESSION_TYPE:-?} ${XDG_CURRENT_DESKTOP:-}"
-  if pgrep -f "quickshell/rice-desktop" >/dev/null; then ok "the shell is running"; else bad "the shell is not running (start it: rice-desktop start)"; fi
+  if "$HOME/.local/bin/rice-running" rice-desktop; then ok "the shell is running"; else bad "the shell is not running (start it: rice-desktop start)"; fi
   local cr="$HOME/.cache/quickshell/crashes" last n
   n="$(find "$cr" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
   if [ "$n" -gt 0 ]; then

@@ -1110,7 +1110,7 @@ def main(argv):
         if arg and os.path.isfile(arg):
             # wallpaper + colors (rice-walls: pictures and live wallpapers); some versions of hyprquickpaper's script
             # restart Quickshell, so the desktop widgets are started again afterwards if they went away
-            bg(["bash", "-c", '"$1" set "$2"; sleep 1; pgrep -f "quickshell/rice-desktop" >/dev/null || setsid -f qs -n -p "$3" >/dev/null 2>&1',
+            bg(["bash", "-c", '"$1" set "$2"; sleep 1; "$HOME/.local/bin/rice-running" rice-desktop || setsid -f qs -n -p "$3" >/dev/null 2>&1',
                 "_", HOME + "/.local/bin/rice-walls", arg, HOME + "/.config/quickshell/rice-desktop"])
     elif cmd == "walls":
         print(json.dumps(walls(60)[0]))

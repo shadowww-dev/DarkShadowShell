@@ -8,7 +8,7 @@ fp_add() { case ":${XDG_DATA_DIRS}:" in *":$1:"*) ;; *) [ -d "$1" ] && XDG_DATA_
 fp_add "${XDG_DATA_HOME:-$HOME/.local/share}/flatpak/exports/share"
 fp_add "/var/lib/flatpak/exports/share"
 export XDG_DATA_DIRS
-running() { pgrep -f "quickshell/rice-desktop" >/dev/null; }
+running() { "$HOME/.local/bin/rice-running" rice-desktop; }
 # a fresh login never starts in the widget editor
 [ "$1" = start ] && "$HOME/.local/bin/desktop-set" edit off >/dev/null 2>&1
 case "$1" in
@@ -76,9 +76,9 @@ case "$1" in
     "$HOME/.local/bin/desktop-set" state >/dev/null 2>&1
     setsid -f "$HOME/.local/bin/rice-desktop" keep >/dev/null 2>&1
     ;;
-  stop) pkill -f "quickshell/rice-desktop" ;;
+  stop) "$HOME/.local/bin/rice-running" rice-desktop kill ;;
   restart)
-    pkill -f "quickshell/rice-desktop"
+    "$HOME/.local/bin/rice-running" rice-desktop kill
     # background helpers: start the new versions
     pkill -f "\.local/bin/rice-ws-watch" 2>/dev/null
     pkill -f "\.local/bin/rice-rules watch" 2>/dev/null
