@@ -170,6 +170,7 @@ PanelWindow {
     readonly property color bg: Look.sq ? gp.minSurface : (goo ? gp.surface : Qt.rgba(0.05, 0.05, 0.05, alpha))
     readonly property real gap: hug ? 3 : (floating ? 8 : 0)
     property string cfgText: ""
+    property bool cfgReady: false
     readonly property string home: Quickshell.env("HOME")
 
     Trigger {
@@ -177,9 +178,10 @@ PanelWindow {
         every: 2000
         onContent: function(t) {
             const x = t.trim()
-            if (x === bar.cfgText) return
+            if (x === bar.cfgText && bar.cfgReady) return
             bar.cfgText = x
             try { bar.bc = x === "" ? ({}) : JSON.parse(x) } catch (e) { }
+            bar.cfgReady = true
         }
     }
 
@@ -195,8 +197,9 @@ PanelWindow {
     // V6.82: that is exclusiveZone -1 itself. Quickshell turns the mode back to Normal whenever exclusiveZone is
     // set, so "Ignore" with a zone of 0 became "Normal, 0": the bar then kept clear of the frame's strip for it and
     // sat a whole bar higher, with the wallpaper under it
-    exclusionMode: hideOn || !on || framed ? ExclusionMode.Ignore : ExclusionMode.Normal
-    exclusiveZone: framed && !hideOn && on ? -1 : (hideOn || !on ? 0 : barH + gap * 2)
+    readonly property bool ignoreZone: !cfgReady || hideOn || !on || framed
+    exclusionMode: ignoreZone ? ExclusionMode.Ignore : ExclusionMode.Normal
+    exclusiveZone: ignoreZone ? -1 : barH + gap * 2
     // only the bar (and the recording island) take the pointer; auto-hide: only a thin strip at the edge
     mask: Region { item: !bar.on ? hitNone : (bar.shownBar ? hitBar : hitStrip); Region { item: hitRec } Region { item: hitIsl } Region { item: hitMenu } Region { item: hitPop } }
     Item { id: hitMenu; x: bar.gap + trayMenu.x; y: body.y + trayMenu.y; width: trayMenu.visible ? trayMenu.width : 0; height: trayMenu.height }
