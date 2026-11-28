@@ -28,12 +28,15 @@ PanelWindow {
     property bool open: false
     property string tab: "control"
     property real t: 0
-    // t runs evenly in time; every part eases on its own (quick start, long soft landing, like Material 3's
-    // emphasized-decelerate), so the panel opens in one smooth wave and closes with a quick, accelerating fade
-    // Light mode (slower computers): a quicker opening (fewer frames to draw)
-    Behavior on t { NumberAnimation { duration: cc.open ? (Look.lite ? 280 : 720) : (Look.lite ? 160 : 260); easing.type: Easing.Linear } }
+    // V6.85: the island's motion, so the corner menu and the island feel like one thing: the same soft overshoot
+    // on the way in, a quicker way out; Light mode (slower computers) is shorter (fewer frames to draw)
+    Behavior on t { NumberAnimation { duration: Look.lite ? 340 : 620
+        easing.type: cc.open ? Easing.OutBack : Easing.InBack; easing.overshoot: Look.lite ? 0 : 0.12 } }
     function ease(p) { return 1 - Math.pow(1 - p, 4) }
-    readonly property real et: ease(t)
+    // the panel follows t itself, so the small overshoot on the way in is actually seen (ease() flattened it)
+    readonly property real et: t
+    // the panel stays near the bar while it opens and the gap opens last: it peels off instead of sliding away
+    readonly property real gapA: 8 * Math.max(0, Math.min(1, (cc.t - 0.45) / 0.35))
     // each part of the panel comes in a little after the one above it (i = its place, from the top)
     function stg(i) { return ease(Math.max(0, Math.min(1, (cc.t - i * 0.035) / 0.615))) }   // i up to 11
     // Control <-> Overview: Material 3 shared axis (the old one slides out and fades, the new one comes in)
@@ -139,9 +142,9 @@ PanelWindow {
     exclusionMode: ExclusionMode.Ignore
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.namespace: "rice-cc"
-    WlrLayershell.keyboardFocus: open ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+    // no keyboard grab: an open menu used to swallow every key, so nothing could be typed until it was closed
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
     MouseArea { anchors.fill: parent; onClicked: cc.open = false }
-    Item { focus: cc.open; Keys.onEscapePressed: cc.open = false }
 
     // ---------- pieces ----------
     // a long slider with its icon inside (brightness, volume, microphone)
@@ -233,16 +236,36 @@ PanelWindow {
         id: panel
         Frame { }      // V4.98 Minimal mode
         width: 440
-        x: parent.width - width - 12 + 64 * (1 - cc.et)
+        x: parent.width - width - 12
         scale: 0.94 + 0.06 * cc.et
         transformOrigin: Item.TopRight
-        anchors.top: parent.top; anchors.bottom: parent.bottom; anchors.topMargin: 58; anchors.bottomMargin: 12
+        anchors.top: parent.top; anchors.bottom: parent.bottom; anchors.topMargin: 50 + cc.gapA; anchors.bottomMargin: 12
         radius: Look.sq ? 0 : (32)
         color: cc.surface
         border.width: 1; border.color: pal.line
         opacity: Math.min(1, cc.et * 1.5)
         clip: true
         MouseArea { anchors.fill: parent }
+        // one sweep of light over the glass while it opens, the island's own
+        Rectangle {
+            id: sheenC
+            width: panel.width * 0.6; height: panel.height * 1.4
+            y: -panel.height * 0.2; rotation: 16
+            visible: sheenCAnim.running && !Look.lite
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0; color: "transparent" }
+                GradientStop { position: 0.5; color: Qt.rgba(1, 1, 1, 0.07) }
+                GradientStop { position: 1; color: "transparent" }
+            }
+            SequentialAnimation {
+                id: sheenCAnim
+                running: cc.open
+                PauseAnimation { duration: 90 }
+                NumberAnimation { target: sheenC; property: "x"; from: -sheenC.width; to: panel.width + sheenC.width
+                    duration: 620; easing.type: Easing.BezierSpline; easing.bezierCurve: Look.emph }
+            }
+        }
 
         // header: close, the two tabs, Settings
         Item {

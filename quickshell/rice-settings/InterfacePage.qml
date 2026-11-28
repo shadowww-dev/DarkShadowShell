@@ -202,7 +202,7 @@ Item {
             ToggleRow {
                 label: I18n.t("Show pin button")
                 desc: I18n.t("Button that holds the dock open")
-                dflt: true; checked: page.dv("pinButton", true) === true
+                dflt: false; checked: page.dv("pinButton", false) === true
                 onToggled: function(v) { page.ctl.dset("dock", "pinButton", v ? "on" : "off") }
             }
             ToggleRow {

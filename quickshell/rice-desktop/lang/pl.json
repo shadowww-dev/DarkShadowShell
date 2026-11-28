@@ -571,7 +571,17 @@
  "Read a QR code": "Odczytaj kod QR",
  "Screenshot saved": "Zrzut ekranu zapisany",
  "Your changes are in it, and it is on the clipboard": "Twoje zmiany są w nim i jest w schowku",
+ "Updates are ready": "Aktualizacje gotowe",
+ "not updated here": "nie aktualizowane tutaj",
+ "not updated here, unless the shell needs the package": "nie aktualizowane tutaj, chyba że shell potrzebuje pakietu",
+ "NixOS system": "System NixOS",
+ "Fedora Atomic (rpm-ostree)": "Fedora Atomic (rpm-ostree)",
+ "Your system updates with sudo nixos-rebuild switch --upgrade; packages stay in configuration.nix": "System aktualizujesz przez sudo nixos-rebuild switch --upgrade; pakiety zostają w configuration.nix",
+ "Layered packages update with sudo rpm-ostree upgrade; a restart puts them on": "Dodane pakiety aktualizujesz przez sudo rpm-ostree upgrade; po restarcie będą włączone",
  "Keep the part between the handles": "Zostaw część między uchwytami",
  "Recording saved": "Nagranie zapisane",
- "GIF": "GIF"
+ "GIF": "GIF",
+ "What Auto follows": "Co śledzi Auto",
+ "Your wallpaper (as it always did), or the cover of the song that plays": "Twoja tapeta (tak jak zawsze) albo okładka granego utworu",
+ "Now playing": "Teraz gra"
 }

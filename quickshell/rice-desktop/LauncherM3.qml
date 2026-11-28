@@ -154,7 +154,7 @@ Item {
                                 size: 56
                                 name: fq.modelData.entry ? (fq.modelData.entry.icon || "") : ""
                                 keys: [fq.modelData.id, fq.modelData.name]
-                                look: ln.iLook; shape: ln.iShape !== "" ? ln.iShape : "cookie"
+                                look: ln.iLook; shape: ln.iShape
                                 colors: m3.pal
                                 active: true
                                 hover: fqm.containsMouse; pressed: fqm.pressed

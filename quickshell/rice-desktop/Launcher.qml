@@ -219,8 +219,15 @@ PanelWindow {
     }
     // how app icons look: Edit mode > Icons (desktop.json "icons"); "auto" is the app's own picture here
     property var iconCfg: ({})
+    property var dockCfg: ({})
     readonly property string iLook: iconCfg.look && iconCfg.look !== "auto" ? iconCfg.look : "original"
-    readonly property string iShape: iconCfg.shape && iconCfg.shape !== "auto" && iconCfg.shape !== "none" ? iconCfg.shape : ""
+    // the shape is the dock's, resolved the same way (Desktop.qml Dock): Edit mode > Icons, then the dock's own,
+    // then the pill style's squircle. The launcher showed no tile (or a cookie) next to a dock that had one
+    readonly property string iShape: {
+        const s = iconCfg.shape !== undefined ? iconCfg.shape : "auto"
+        if (s !== "auto") return s === "none" ? "" : s
+        return dockCfg.iconShape || (dockCfg.style === "pills" ? "squircle" : "")
+    }
     // the keys of the search field (both looks)
     function keyNav(e, inp) {
         const ctrl = (e.modifiers & Qt.ControlModifier) !== 0
@@ -327,7 +334,7 @@ PanelWindow {
         watchChanges: true
         printErrors: false
         onFileChanged: reload()
-        onLoaded: { try { const j = JSON.parse(text()); ln.dockApps = j.dock && j.dock.apps ? j.dock.apps : []; ln.iconCfg = j.icons || ({}) } catch (e) { } }
+        onLoaded: { try { const j = JSON.parse(text()); ln.dockApps = j.dock && j.dock.apps ? j.dock.apps : []; ln.dockCfg = j.dock || ({}); ln.iconCfg = j.icons || ({}) } catch (e) { } }
     }
     function appId(r) { return r && r.entry ? (r.entry.id || "").replace(/\.desktop$/, "") : "" }
     function onDock(r) { return dockApps.indexOf(appId(r)) >= 0 }

@@ -65,6 +65,8 @@ The bar, the welcome window and Settings show **your distro's logo** automatical
 
 CachyOS and Fedora support is new: if something does not install, open an issue with the installer log and it gets fixed fast.
 
+**The Update Center works on all of them**: it shows the shell, the system's packages (pacman, dnf, emerge, flatpak, snap ...) and one button updates them together in a terminal, where the password belongs. NixOS and the atomic Fedoras keep their own command (`nixos-rebuild`, `rpm-ostree`) and the Update Center shows it instead of running it.
+
 ### Hyprland or niri
 The shell runs on **Hyprland** and on **niri** (the scrollable-tiling window manager), on every system above. Hyprland is set up by default; `./install.sh --wm=niri` sets up niri, `--wm=both` both (then you pick one on the login screen).
 

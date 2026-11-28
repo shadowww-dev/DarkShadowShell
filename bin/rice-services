@@ -9,6 +9,7 @@
   rice-services profile power-saver|balanced|performance|get
   rice-services bar                       {network, wifi, bluetooth, dnd}: the little the bar shows, cheap (V4.96)
   rice-services pp state|start            power modes: JSON {installed, running, profiles, active, why}; start the daemon
+  rice-services polkit                    start the password-prompt agent if none runs (the login autostart does)
   rice-services session lock|suspend|logout|reboot|poweroff   (the last three ask first)
 """
 import json
@@ -276,6 +277,30 @@ def pp_state():
     return {"installed": installed, "running": bool(profiles), "profiles": profiles, "active": active, "why": why}
 
 
+POLKIT_PAT = "polkit.*agent|hyprpolkitagent|polkit-gnome-authentication"
+
+
+def polkit_agent():
+    """starts the password-prompt agent if none runs. Without one pkexec only says "authentication is needed
+    to run ... as the super user", so every admin button (SDDM's theme, power profiles) did nothing"""
+    import time
+    if subprocess.run(["pgrep", "-u", str(os.getuid()), "-f", POLKIT_PAT], capture_output=True).returncode == 0:
+        return True
+    r = run(["systemctl", "--user", "start", "hyprpolkitagent.service"], 8)
+    if r is None or r.returncode != 0:
+        for a in ("/usr/lib/hyprpolkitagent/hyprpolkitagent", "/usr/libexec/hyprpolkitagent",
+                  "/usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1",
+                  "/usr/libexec/polkit-gnome-authentication-agent-1", "/usr/lib/polkit-kde-authentication-agent-1"):
+            if os.access(a, os.X_OK):
+                bg([a])
+                break
+        else:
+            if shutil.which("hyprpolkitagent"):
+                bg(["hyprpolkitagent"])
+    time.sleep(0.8)
+    return subprocess.run(["pgrep", "-u", str(os.getuid()), "-f", POLKIT_PAT], capture_output=True).returncode == 0
+
+
 def pp_start():
     """turns power-profiles-daemon on now and at every start (asks for your password), then waits for it"""
     import time
@@ -291,18 +316,7 @@ def pp_start():
                "systemctl enable --now power-profiles-daemon.service"]
     else:
         cmd = ["pkexec", BIN + "/rice-sys", "service-enable", "power-profiles-daemon"]
-    # a password prompt needs a polkit agent: start one if none runs
-    if subprocess.run(["pgrep", "-u", str(os.getuid()), "-f", "polkit.*agent|hyprpolkitagent|polkit-gnome-authentication"],
-                      capture_output=True).returncode != 0:
-        r = run(["systemctl", "--user", "start", "hyprpolkitagent.service"], 8)
-        if r is None or r.returncode != 0:
-            for a in ("/usr/lib/hyprpolkitagent/hyprpolkitagent", "/usr/libexec/hyprpolkitagent",
-                      "/usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1",
-                      "/usr/libexec/polkit-gnome-authentication-agent-1", "/usr/lib/polkit-kde-authentication-agent-1"):
-                if os.access(a, os.X_OK):
-                    bg([a])
-                    break
-        time.sleep(0.8)
+    polkit_agent()
     r = run(cmd, 120)
     if r is None or r.returncode != 0:
         print("fail:" + ((r.stderr.strip().splitlines() or [""])[-1] if r else "pkexec not found"))
@@ -404,6 +418,9 @@ def main(a):
         print(json.dumps(pp_state()))
     elif cmd == "pp" and len(a) > 2 and a[2] == "start":
         pp_start()
+    elif cmd == "polkit":
+        # at login (Hyprland's autostart): the password window for every admin action, pkexec needs it
+        sys.exit(0 if polkit_agent() else 1)
     elif cmd == "session" and len(a) > 2:
         session(a[2])
     elif cmd == "night-temp" and len(a) > 2:

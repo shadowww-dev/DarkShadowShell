@@ -251,7 +251,7 @@ FloatingWindow {
     // rice-settings PAGE: open on that page (the Settings card of the dashboard uses it)
     Process {
         command: ["bash", "-c", "f=\"$HOME/.cache/rice/settings-page\"; if [ -f \"$f\" ]; then cat \"$f\"; rm -f \"$f\"; " +
-                  "elif grep -q '\"state\": \"running\"' \"$HOME/.cache/rice/update-live.json\" 2>/dev/null; then echo 35; fi"]
+                  "elif \"$HOME/.local/bin/rice-update\" live 2>/dev/null | grep -q '\"state\": \"running\"'; then echo 35; fi"]
         running: true
         stdout: StdioCollector {
             onStreamFinished: {
@@ -264,6 +264,14 @@ FloatingWindow {
     property var st: ({})
     property string status: ""
     property string colorMode: "auto"
+    // V6.84: "Auto" follows the wallpaper; the cover of what plays is a choice next to it (ThemePage)
+    property bool coverColors: true
+    FileView {
+        path: win.home + "/.config/rice/vibe.json"
+        watchChanges: true; printErrors: false
+        onFileChanged: reload()
+        onLoaded: { try { const j = JSON.parse(text()); win.coverColors = j.cover !== false } catch (e) { } }
+    }
     property alias stateTimer: stateTimer
     property var dst: ({ widgets: {}, clock: {}, dock: {}, lock: {} })
     property string osName: "Linux"
@@ -594,6 +602,13 @@ FloatingWindow {
     function toggleModule(name, on) {
         setSt(name, on)
         run(["toggle", name, on ? "on" : "off"])
+    }
+
+    function setAutoSource(cover) {
+        coverColors = cover
+        Quickshell.execDetached(["bash", "-c", "\"$HOME/.local/bin/rice-vibe\" set cover \"$1\"", "_", cover ? "on" : "off"])
+        status = cover ? "Auto: the cover of the song that plays" : "Auto: your wallpaper"
+        stateTimer.restart()
     }
 
     function setColorMode(m) {

@@ -11,16 +11,22 @@ Item {
 
     readonly property string bin: Quickshell.env("HOME") + "/.local/bin/rice-update"
     property var st: ({})            // rice-update check: installed, latest, update, news, error
+    property var pk: ({})            // rice-care updates: what the system's packages (any distro), Flatpak and Snap have waiting
+    readonly property var pkgNotes: ((page.pk && page.pk.managers) || []).filter(function(m) { return m.manual && !m.count && m.note })
+    property bool inTerminal: false  // the packages need the password, so the update moved to a terminal
     property var lv: ({})            // the update that runs (or ran): state, started, ended, was, now
     property var steps: []           // what the installer did: { k: run|ok|fail|warn|info|title|note, t }
     property bool checking: false
     property bool starting: false
     property int now: Math.floor(Date.now() / 1000)
+    property bool pidAlive: false
+    property string healed: ""      // the state V7.01 already asked the healing rice-update live about
 
-    readonly property bool running: lv.state === "running" || starting
+    readonly property bool running: lv.state === "running" || lv.state === "terminal" || starting
     readonly property bool finished: !running && (lv.state === "done" || lv.state === "failed")
     readonly property bool failed: !running && lv.state === "failed"
     readonly property bool hasUpdate: !!st.update
+    readonly property int pkgTotal: (page.pk && page.pk.updateable) || 0
     readonly property int doneCount: steps.filter(function(s) { return s.k === "ok" || s.k === "fail" }).length
     readonly property var current: {
         for (let i = steps.length - 1; i >= 0; i--) if (steps[i].k === "run") return steps[i]
@@ -96,43 +102,90 @@ Item {
         }
         onExited: page.checking = false
     }
-    function check() { if (checkP.running || page.running) return; page.checking = true; checkP.running = true }
-
+    function check() { if (checkP.running || page.running) return; page.checking = true; page.inTerminal = false; checkP.running = true
+        page.loadPackages(true) }
+    // the package answer is shared with the About tab (rice-care keeps it for 10 minutes); --fresh after an update
     Process {
-        id: liveP
-        command: ["bash", "-c", "cat \"$HOME/.cache/rice/update-live.json\" 2>/dev/null; printf '\\n\\x1e\\n'; tail -n 400 \"$HOME/.cache/rice/update-live.log\" 2>/dev/null"]
-        running: true
-        stdout: StdioCollector {
-            onStreamFinished: {
-                const cut = text.indexOf("\x1e")
-                let o = {}
-                try { o = JSON.parse(text.substring(0, cut).trim() || "{}") } catch (e) {}
-                const was = page.lv.state
-                page.lv = o
-                if (page.starting && (o.state === "running" || (o.started && o.started >= page.startedAt))) page.starting = false
-                page.steps = page.parse(cut >= 0 ? text.substring(cut + 1) : "")
-                if (was === "running" && o.state !== "running") { stateP.running = true; page.ctl.status = o.state === "done" ? I18n.t("Updated") : I18n.t("The update did not finish") }
+        id: pkP
+        command: ["true"]
+        stdout: StdioCollector { onStreamFinished: {
+            try { page.pk = JSON.parse(text) } catch (e) { page.pk = {} }
+            if (!page.pkgTotal) page.inTerminal = false
+        } }
+    }
+    function loadPackages(fresh) {
+        if (pkP.running || page.running) return
+        pkP.command = ["bash", "-c", "\"$HOME/.local/bin/rice-care\" updates" + (fresh ? " --fresh" : "") + " 2>/dev/null"]
+        pkP.running = true
+    }
+    Component.onCompleted: page.loadPackages(false)
+
+    // the state and the log are files: read them where they are. V7.01: every 450 ms this page used to start bash,
+    // python (rice-update live) and tail only to read two files (~2.2 processes a second for the whole update)
+    function applyLive(t) {
+        let o = {}
+        try { o = JSON.parse(t || "{}") } catch (e) {}
+        const was = page.lv.state
+        page.lv = o
+        if (page.starting && (o.state === "running" || (o.started && o.started >= page.startedAt))) page.starting = false
+        if (was === "running" && o.state !== "running") { stateP.running = true; page.loadPackages(true)
+            page.ctl.status = o.state === "done" ? I18n.t("Updated") : I18n.t("The update did not finish") }
+    }
+    FileView {
+        id: liveF
+        path: Quickshell.env("HOME") + "/.cache/rice/update-live.json"
+        watchChanges: true
+        printErrors: false
+        onFileChanged: reload()
+        onLoaded: page.applyLive(text())
+        onLoadFailed: page.applyLive("")
+    }
+    FileView {
+        id: logF
+        path: Quickshell.env("HOME") + "/.cache/rice/update-live.log"
+        watchChanges: true
+        printErrors: false
+        onFileChanged: reload()
+        onLoaded: { const t = text(); page.steps = page.parse(t.split("\n").slice(-400).join("\n")) }
+        onLoadFailed: page.steps = []
+    }
+    FileView {
+        id: pidF
+        path: page.lv.state === "running" && page.lv.pid ? "/proc/" + page.lv.pid + "/stat" : ""
+        printErrors: false
+        onLoaded: page.pidAlive = true
+        onLoadFailed: page.pidAlive = false
+    }
+    // rice-update live clears a "running" state whose process is gone (killed update, reboot). It is asked for only
+    // then, once, instead of on every poll: the update screen now reads the files itself
+    Process { id: healP; command: [page.bin, "live"]; running: false }
+    property int startedAt: 0
+    Timer {
+        interval: 1000
+        repeat: true
+        running: page.visible
+        onTriggered: {
+            page.now = Math.floor(Date.now() / 1000)
+            pidF.reload()
+            const key = page.lv.state + ":" + (page.lv.started || 0)
+            if (page.healed !== key) {
+                if (page.lv.state === "running" && page.now - page.lv.started > 10 && !page.pidAlive) { page.healed = key; healP.running = true }
+                else if (page.lv.state === "terminal" && page.now - page.lv.started > 120) { page.healed = key; healP.running = true }
             }
         }
     }
-    property int startedAt: 0
-    Timer {
-        interval: page.running ? 450 : 4000
-        repeat: true
-        running: page.visible
-        onTriggered: { page.now = Math.floor(Date.now() / 1000); if (!liveP.running) liveP.running = true }
-    }
     // the button press: the update starts, and after a reload Settings comes back to this page by itself
-    function update(withPackages) {
+    // the same call from here and from the About tab: rice-update decides terminal (packages wait) or background
+    function update() {
         if (page.running) return
-        if (withPackages) {
-            Quickshell.execDetached(["bash", "-c", "t=\"$HOME/.local/bin/rice-term\"; [ -x \"$t\" ] || t=\"${TERMINAL:-kitty}\"; exec \"$t\" -e \"$HOME/.local/bin/rice-update\""])
-            return
-        }
+        page.inTerminal = true
         page.startedAt = Math.floor(Date.now() / 1000)
         page.starting = true
         page.steps = []
-        Quickshell.execDetached([page.bin, "gui"])
+        // V7.15: the island's updater exactly: always a terminal, which shows every step as it happens and asks for
+        // the password there. The page used to take the background path when no packages waited, so the same click
+        // did one thing from the island and another from here
+        Quickshell.execDetached([page.bin, "update", "--terminal"])
         startGuard.restart()
     }
     Timer { id: startGuard; interval: 15000; onTriggered: page.starting = false }
@@ -213,17 +266,38 @@ Item {
                 width: parent.width - 124 - 24
                 spacing: 6
                 T { kind: "title"; font.pixelSize: 26; font.weight: Font.Medium; color: M3.inkPrimaryC; width: parent.width; wrapMode: Text.WordWrap
-                    text: page.running ? I18n.t("Updating...")
+                    text: page.running ? (page.lv.state === "terminal" ? I18n.t("Continuing in the terminal") : I18n.t("Updating..."))
                         : page.failed ? I18n.t("The update did not finish")
                         : page.finished && !page.hasUpdate && page.lv.ended && page.now - page.lv.ended < 3600 ? I18n.t("Updated to V%1", page.st.installed || page.lv.now || "?")
                         : page.hasUpdate ? I18n.t("V%1 is available", page.st.latest)
+                        : page.pkgTotal > 0 ? I18n.t("Updates are ready")
                         : page.checking ? I18n.t("Looking for updates...")
                         : I18n.t("You are up to date") }
                 T { kind: "reading"; font.pixelSize: 13; color: M3.inkPrimaryC; opacity: 0.85; width: parent.width; wrapMode: Text.WordWrap
-                    text: page.running ? (page.current ? page.current.t : I18n.t("Getting the newest version from GitHub..."))
+                    text: page.running ? (page.lv.state === "terminal" ? I18n.t("A terminal opened to show what changes and ask: answer y there.")
+                            : (page.current ? page.current.t : I18n.t("Getting the newest version from GitHub...")))
                         : page.failed ? I18n.t("Nothing is broken: what was done stays, the rest keeps your old files. Try again, or look at the steps below.")
-                        : page.hasUpdate ? (page.st.installed !== page.st.latest ? I18n.t("You have V%1.", page.st.installed) : I18n.t("%1 new changes on GitHub.", page.st.changes))
+                        : page.hasUpdate ? (page.st.installed !== page.st.latest ? I18n.t("You have V%1.", page.st.installed) : I18n.t("%1 new changes on GitHub.", page.st.changes)) +
+                            (page.st.checked ? "  ·  " + I18n.t("checked %1", page.ago(page.st.checked)) : "")
                         : I18n.t("DarkShadow's Shell V%1", page.st.installed || "?") + (page.st.checked ? "  ·  " + I18n.t("checked %1", page.ago(page.st.checked)) : "") }
+                T { visible: page.pkgTotal > 0 && !page.running; kind: "reading"; font.pixelSize: 12; color: M3.inkPrimaryC; opacity: 0.75
+                    width: parent.width; wrapMode: Text.WordWrap
+                    text: I18n.t("%1 system updates wait: they finish in a terminal (your password there)", page.pkgTotal) }
+                Flow {
+                    width: parent.width; spacing: 6; visible: page.pkgTotal > 0 || page.inTerminal
+                    Repeater {
+                        model: (page.pk.managers || []).filter(function(m) { return m.count > 0 })
+                        delegate: Rectangle {
+                            required property var modelData
+                            height: 24; width: pc.implicitWidth + 16; radius: M3.sq ? 0 : 12; color: M3.alpha(M3.primary, 0.14)
+                            T { id: pc; anchors.centerIn: parent; font.pixelSize: 11; color: M3.inkPrimaryC
+                                text: I18n.t(modelData.name) + "  " + modelData.count + (modelData.manual ? "  ·  " + I18n.t("not updated here") : "") }
+                        }
+                    }
+                }
+                T { visible: page.pkgNotes.length > 0 && !page.running; width: parent.width; wrapMode: Text.WordWrap
+                    font.pixelSize: 11; color: M3.inkPrimaryC; opacity: 0.7
+                    text: page.pkgNotes.map(function(m) { return I18n.t(m.note) }).join("\n") }
                 // the progress line while it runs
                 Item {
                     width: parent.width; height: page.running ? 22 : 0
@@ -239,9 +313,10 @@ Item {
                 Row {
                     spacing: 8
                     topPadding: 6
-                    Btn { visible: !page.running && (page.hasUpdate || page.failed); primary: true; sym: "download"; icon: ""
-                        text: page.failed ? I18n.t("Try again") : I18n.t("Update now"); onClicked: page.update(false) }
-                    Btn { visible: !page.running; sym: "refresh"; icon: ""; primary: !page.hasUpdate && !page.failed
+                    Btn { visible: !page.running && (page.hasUpdate || page.failed || page.pkgTotal > 0); primary: true; sym: "download"; icon: ""
+                        text: page.failed ? I18n.t("Try again") : (page.pkgTotal > 0 ? I18n.t("Update everything") : I18n.t("Update now"))
+                        onClicked: page.update() }
+                    Btn { visible: !page.running; sym: "refresh"; icon: ""; primary: !page.hasUpdate && !page.failed && page.pkgTotal === 0
                         text: page.checking ? I18n.t("Checking...") : I18n.t("Check for updates"); onClicked: page.check() }
                     Btn { visible: page.running; sym: "hourglass_top"; icon: ""; variant: "text"; text: I18n.t("You can close Settings: it keeps going"); onClicked: {} }
                 }
@@ -359,23 +434,8 @@ Item {
             onClicked: if (page.ctl && page.ctl.showWhatsNew) page.ctl.showWhatsNew() }
 
         // ---------- more ----------
-        SectionTitle { text: I18n.t("More"); sub: I18n.t("Updates here bring the shell, its apps and your configs. New system packages need your password, so they update in a terminal.") }
-        Rectangle {
-            width: parent.width
-            height: 70
-            radius: M3.sq ? 0 : (M3.rM)
-            color: M3.surfaceC
-            Rectangle { x: 14; anchors.verticalCenter: parent.verticalCenter; width: 40; height: 40; radius: M3.sq ? 0 : (20); color: M3.secondaryContainer
-                Icon { anchors.centerIn: parent; name: "terminal"; glyph: ""; size: 18; color: M3.inkSecondaryC } }
-            Column {
-                x: 68; anchors.verticalCenter: parent.verticalCenter
-                width: parent.width - 68 - pkgBtn.width - 28
-                spacing: 2
-                T { text: I18n.t("Update with packages"); font.pixelSize: 14; font.weight: Font.Medium }
-                T { text: I18n.t("The full update in a terminal: packages too (asks for your password)."); font.pixelSize: 11; color: M3.inkDim; width: parent.width; elide: Text.ElideRight }
-            }
-            Btn { id: pkgBtn; anchors.right: parent.right; anchors.rightMargin: 14; anchors.verticalCenter: parent.verticalCenter
-                enabled: !page.running; text: I18n.t("Open"); sym: "open_in_new"; icon: ""; onClicked: page.update(true) }
-        }
+        SectionTitle { text: I18n.t("More")
+            sub: page.pk && page.pk.snapshot !== "" ? I18n.t("A snapshot (%1) is made before the packages, so an update can be undone", page.pk.snapshot || "")
+                                                    : I18n.t("The shell, its apps and the system's packages update together, on your distro too") }
     }
 }

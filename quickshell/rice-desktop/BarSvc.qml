@@ -16,6 +16,9 @@ Singleton {
     property bool recOn: false          // screen recording (shared: every bar shows the same island)
     property real recStart: 0
     property bool micMuted: false
+    property real barAlpha: 0.72       // the bar's opacity: the menus are other windows and cannot read it themselves
+    property real barInset: 8          // the bar's distance from the screen edge, and its own height: the menus
+    property real barH: 38             // are other windows too, and a card's pill has to start on the bar (DropCard.qml)
     function refresh() { if (!svcProc.running) svcProc.running = true }
     // after a click: rice-cc writes the new state first (it used to be a 700 ms timer in each bar)
     function refreshSoon() { soon.restart() }

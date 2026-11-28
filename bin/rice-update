@@ -7,6 +7,10 @@
   rice-update watch [on|off|state]  background: checks after login and once a day, shows a notification; off: no checks
                             (how often: every_minutes in ~/.config/rice/update.json, 60 - 10080)
   rice-update notify        show the "Update is Available!" notification now (to try it)
+  rice-update update        the one update both Settings > Update Center and the About tab run: the shell, and the
+                            system's packages (Arch, Fedora, Gentoo, Flatpak, Snap ...) in a terminal when any
+                            wait (the password belongs there). AUR is not updated here: install.sh upgrades only
+                            what the shell needs
   rice-update gui           update in the background for Settings > Update Center (no terminal): the steps go to
                             ~/.cache/rice/update-live.log, the state to ~/.cache/rice/update-live.json
   rice-update whatsnew [VERSION]   JSON: what is new in this version (or VERSION), from the CHANGELOG
@@ -239,40 +243,122 @@ def check(offline=False):
     out = {"installed": have, "latest": new or have, "update": newer or ahead > 0,
            "changes": ahead, "commit": getattr(latest, "sha", ""),
            "news": news(getattr(latest, "log", ""), new or have)[:4],
-           "checked": int(time.time()), "error": err if not new else ""}
+           "checked": int(time.time()),
+           # a failed fetch used to be dropped whenever any version was known, so the page showed the last
+           # version it had seen (the stale branch) as a fresh answer: "Check for updates" looked dead
+           "error": err}
     if is_zip(repo()):
         out["update"] = True
         out["error"] = ZIP_MSG
     os.makedirs(CACHE, exist_ok=True)
     try:
-        json.dump(out, open(STATE, "w"))
+        # V7.00: a reader (the watch loop, the About tab) must never see half a file: the answer goes beside the
+        # old one and is swapped in whole, as the other state files here do
+        tmp = STATE + ".new"
+        json.dump(out, open(tmp, "w"))
+        os.replace(tmp, STATE)
     except OSError:
         pass
     return out
 
 
-def terminal_update():
+def our_update(pid):
+    """a live process that is this updater, not a pid number that was reused. A terminal window that waits at
+    "Press Enter to close" stays alive after its update finished, so being alive alone proves nothing."""
+    if not alive(pid):
+        return False
+    cmd = None
+    try:
+        cmd = open("/proc/%d/cmdline" % int(pid), "rb").read().replace(b"\0", b" ").decode("utf-8", "replace")
+    except (OSError, ValueError):
+        # no /proc (not Linux, or a hidden one): ps knows the command line everywhere else
+        try:
+            cmd = subprocess.run(["ps", "-p", str(int(pid)), "-o", "args="], capture_output=True, text=True,
+                                 timeout=2).stdout
+        except Exception:
+            return True                # nothing to ask: the old alive check is the best there is
+    return "rice-update" in cmd
+
+
+def terminal_open():
+    """is there a terminal with this update in it: its pid in update-terminal.pid, or a fresh marker (gnome-terminal
+    hands the window to another process at once). Takes no live state, so live() can ask it without a loop."""
+    pidf = CACHE + "/update-terminal.pid"
+    try:
+        pid = int(open(pidf).read().strip())
+        if our_update(pid):
+            return True
+        os.unlink(pidf)                # a closed window, or a pid that now belongs to something else
+    except (OSError, ValueError):
+        pass
+    # a terminal that hands the window to another process (gnome-terminal) is gone at once: its fresh marker counts
+    try:
+        return time.time() - os.path.getmtime(CACHE + "/update-terminal") < 90
+    except OSError:
+        return False
+
+
+def terminal_active():
+    """a terminal opened for the update a moment ago, or one still running it.
+    (the terminal that is gone left the live state on "terminal": without this, every later Update did nothing)"""
+    # V6.97: the terminal reports when its update ends (RICE_LIVE). The window then stays open at "Press Enter to
+    # close", still alive: counting its pid blocked every later Update for as long as that window was open.
+    return live().get("state") in ("terminal", "running") and terminal_open()
+
+
+def terminal_update(extra=None):
     """ONE terminal with rice-update in it (at most one a minute), without the background update's settings: an old
     installer (before V4.56) that saw RICE_GUI in its terminal opened another terminal instead of asking, endlessly"""
     mark = CACHE + "/update-terminal"
-    try:
-        if time.time() - os.path.getmtime(mark) < 60:
-            return
-    except OSError:
-        pass
+    st = live()
+    if st.get("state") == "running" and our_update(st.get("pid")):
+        # the update itself is running (opened in a terminal, or the quiet one): do not open a second
+        return True
+    if terminal_active():
+        # a terminal for this same update opened a moment ago: that one is this update, not a failure
+        return True
     os.makedirs(CACHE, exist_ok=True)
+    # V6.97: the marker and then the state are set before the window opens, so a second click in the same moment does
+    # not open another, and the caller does not overwrite the "running" the new terminal reports a moment later
     open(mark, "w").write(str(int(time.time())))
+    put_live(state="terminal", code=-1, started=int(time.time()), ended=0, pid=0, was=installed())
     env = dict(os.environ)
     for k in ("RICE_GUI", "NO_COLOR", "GIT_TERMINAL_PROMPT", "GCM_INTERACTIVE"):
         env.pop(k, None)
+    # the terminal's rice-update reports running / done, so Settings follows it instead of showing a failure
+    env["RICE_LIVE"] = "1"
     t = os.environ.get("TERMINAL") or "kitty"
     if not shutil.which(t):
         t = next((x for x in ("kitty", "foot", "alacritty", "wezterm", "konsole", "gnome-terminal") if shutil.which(x)), t)
-    cmd = [t, "-e", HOME + "/.local/bin/rice-update"]
-    if os.access(HOME + "/.local/bin/rice-term", os.X_OK):        # your terminal (Settings > Look & Feel)
-        cmd = [HOME + "/.local/bin/rice-term", "-e", HOME + "/.local/bin/rice-update"]
-    subprocess.Popen(cmd, start_new_session=True, env=env,
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # V6.99: your terminal first, then the one found, so a configured terminal that cannot start (a missing
+    # display, an unknown flag) still gets a window instead of looking like a dead Update now
+    # V7.00: flags like --no-upgrade travel with the terminal (rice-update with no command passes them to install.sh)
+    tail = [HOME + "/.local/bin/rice-update"] + list(extra or [])
+    tries = []
+    if os.access(HOME + "/.local/bin/rice-term", os.X_OK):
+        tries.append([HOME + "/.local/bin/rice-term", "-e"] + tail)
+    if [t, "-e"] + tail not in tries:
+        tries.append([t, "-e"] + tail)
+    for cmd in tries:
+        try:
+            p = subprocess.Popen(cmd, start_new_session=True, env=env,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError:
+            continue
+        time.sleep(0.25)
+        # a window that is gone at once failed (no display, a bad flag); one that exited 0 handed its window on
+        if getattr(p, "poll", lambda: None)() not in (None, 0):
+            continue
+        try:
+            open(CACHE + "/update-terminal.pid", "w").write(str(p.pid))
+        except OSError:
+            pass
+        return True
+    try:
+        os.unlink(mark)                # nothing will report running: do not leave a false "terminal" for 90 s
+    except OSError:
+        pass
+    return False
 
 
 def installer_changes(r):
@@ -305,10 +391,25 @@ def open_center():
 
 
 def live():
+    """the update that runs (or ran); V6.98: a state left on "running"/"terminal" by an update that is gone is
+    healed to "failed" here. After a killed update or a reboot nothing was alive, but Settings kept its last state:
+    "running" disabled Update now and Update Center forever, with no process to find."""
     try:
-        return json.load(open(LIVE))
+        st = json.load(open(LIVE))
     except (OSError, ValueError):
         return {}
+    if not isinstance(st, dict):
+        return {}
+    dead = st.get("state") == "running" and not our_update(st.get("pid"))
+    if st.get("state") == "terminal" and not terminal_open():
+        dead = True
+    if dead:
+        st = dict(st, state="failed", code=1, ended=int(time.time()) or 1, pid=0)
+        try:
+            put_live(**st)
+        except (OSError, TypeError):
+            pass
+    return st
 
 
 def alive(pid):
@@ -327,6 +428,17 @@ def put_live(**kw):
     os.replace(tmp, LIVE)
 
 
+def finish(t0, code, was):
+    """how an update ends, one copy for the quiet background one and the one in a terminal: what it was, what it
+    became, and a fresh version check (offline: the update itself already pulled the newest)"""
+    try:
+        check(offline=True)
+    except Exception:
+        pass
+    put_live(state="done" if code == 0 else "failed", code=code, started=t0, ended=int(time.time()), pid=0,
+             was=was, now=installed())
+
+
 def gui(args):
     """the update without a terminal: install.sh --update --yes --no-packages, detached from Settings (the update
     puts new Settings files in place, so Settings reloads in the middle; this keeps running and Settings reads on)"""
@@ -339,7 +451,10 @@ def gui(args):
         print("already updating")
         return 0
     st = live()
-    if st.get("state") == "running" and alive(st.get("pid")):
+    if st.get("state") == "terminal" and terminal_active():
+        print("already updating")
+        return 0
+    if st.get("state") == "running" and our_update(st.get("pid")):
         print("already updating")
         return 0
     r = repo()
@@ -363,10 +478,12 @@ def gui(args):
     if installer_changes(r):
         log.write("    \u2139 This update changes the installer, so it is asked about in a terminal: one opened now.\n"
                   "      Answer y there (it may ask for your password). Nothing was changed yet.\n")
-        put_live(state="failed", code=1, started=t0, ended=int(time.time()), pid=0, was=installed())
-        terminal_update()
+        if not terminal_update():
+            log.write("    \u2718 No terminal could be opened. Run  rice-update  in one to apply it.\n")
+            put_live(state="failed", code=1, started=t0, ended=int(time.time()), pid=0, was=installed())
         os._exit(0)
-    put_live(state="running", code=-1, started=t0, ended=0, pid=os.getpid(), was=installed())
+    was = installed()
+    put_live(state="running", code=-1, started=t0, ended=0, pid=os.getpid(), was=was)
     env = dict(os.environ, RICE_GUI="1", RICE_UPDATE_LOCK="1", NO_COLOR="1", GIT_TERMINAL_PROMPT="0", GCM_INTERACTIVE="never")
     env.pop("SUDO_ASKPASS", None)
     want = ["--update", "--yes"] + (args if args else ["--no-packages"])
@@ -376,13 +493,44 @@ def gui(args):
     except Exception as e:
         log.write("    \u2718 %s\n" % e)
         code = 1
-    try:
-        check(offline=True)
-    except Exception:
-        pass
-    put_live(state="done" if code == 0 else "failed", code=code, started=t0, ended=int(time.time()), pid=0,
-             was=live().get("was", ""), now=installed())
+    finish(t0, code, was)
     os._exit(0)
+
+
+def packages_pending():
+    """updates waiting in the system's packages, Flatpak or Snap: those need the password, so they run in a terminal.
+    AUR is shown in Settings but never updated here (only the packages the shell itself needs, and install.sh does
+    that). The check may take minutes (emerge, dnf): the timeout covers the slowest one."""
+    b = HOME + "/.local/bin/rice-care"
+    if not os.access(b, os.X_OK):
+        return 0
+    try:
+        r = subprocess.run([b, "updates"], capture_output=True, text=True, timeout=600)
+        d = json.loads((r.stdout.strip().splitlines() or ["{}"])[-1])
+        if isinstance(d.get("updateable"), int):
+            return d["updateable"]
+        return sum(int(m.get("count") or 0) for m in d.get("managers") or [] if not m.get("manual"))
+    except Exception:
+        return 0
+
+
+def update_all(args):
+    """one action for both places that show updates: a terminal when packages wait, else the quiet GUI update.
+    V6.99: the places that already know say which (--terminal / --gui), so a click no longer waits for the package
+    check first: it can take minutes (checkupdates, flatpak, snap, AUR), and the button looked dead all that time."""
+    args = list(args)
+    want = "--terminal" if "--terminal" in args else ("--gui" if "--gui" in args else "")
+    args = [a for a in args if a not in ("--terminal", "--gui")]
+    if want == "--gui":
+        return gui(args)
+    if want == "--terminal" or packages_pending() > 0:
+        if not terminal_update(args):
+            # V6.97: no terminal opened: say it failed instead of showing an update in a terminal that is not there
+            t0 = int(time.time())
+            open(LIVE_LOG, "w").write("    \u2718 No terminal could be opened. Run  rice-update  in one to apply it.\n")
+            put_live(state="failed", code=1, started=t0, ended=t0, pid=0, was=installed())
+        return 0
+    return gui(args)
 
 
 def body(st):
@@ -408,7 +556,8 @@ def notify(st):
                             "-c", "system.update",
                             "-A", "default=Update now", "-A", "update=Update now", "-A", "later=Later",
                             "--wait", "Update is Available!", body(st)],
-                           capture_output=True, text=True, timeout=6 * 3600)
+                           # V7.01: a popup nobody answers used to keep this process for six hours
+                           capture_output=True, text=True, timeout=600)
         if r.stdout.strip() in ("default", "update"):
             open_center()
     except Exception:
@@ -443,6 +592,15 @@ def mtime(p):
         return 0
 
 
+def last_checked():
+    """when the last check ran, kept across restarts: a shell that restarts (an update, a reload) used to check
+    again 45 s later, so every push gave a new "Update is Available" within a minute"""
+    try:
+        return min(time.time(), float(json.load(open(STATE)).get("checked") or 0))
+    except (OSError, ValueError, TypeError):
+        return 0.0
+
+
 def watch():
     c = cfg()
     if c.get("watch") is False:
@@ -455,7 +613,7 @@ def watch():
     except OSError:
         return  # already running
     time.sleep(FIRST_WAIT)
-    last, seen = 0.0, 0.0
+    last, seen = last_checked(), mtime(STATE)
     while True:
         # Settings > Language & region > Check for updates is read again every tick: off stops this one at once
         c = cfg()
@@ -473,7 +631,9 @@ def watch():
                 m = mtime(STATE)
                 if m and m != seen:
                     seen = m
-                    maybe_notify(json.load(open(STATE)))
+                    st = json.load(open(STATE))
+                    last = max(last, float(st.get("checked") or 0))
+                    maybe_notify(st)
         except Exception:
             pass
         time.sleep(TICK)
@@ -503,7 +663,15 @@ def run(args):
     env = dict(os.environ)
     for k in ("RICE_GUI", "NO_COLOR", "GIT_TERMINAL_PROMPT", "GCM_INTERACTIVE"):
         env.pop(k, None)   # a terminal the Update Center opened must ask, not act like the background update
+    live_run = os.environ.get("RICE_LIVE") == "1"
+    env.pop("RICE_LIVE", None)
+    t0 = int(time.time())
+    was = installed()
+    if live_run:
+        put_live(state="running", code=-1, started=t0, ended=0, pid=os.getpid(), was=was)
     code = subprocess.call(["./install.sh", "--update"] + args, env=env)
+    if live_run:
+        finish(t0, code, was)
     print()
     try:
         input("Press Enter to close")
@@ -576,7 +744,9 @@ def main(a):
         except OSError:
             pass
         return
-    if cmd == "check":
+    if cmd == "live":
+        print(json.dumps(live()))
+    elif cmd == "check":
         st = check(offline="--offline" in a)
         if "--json" in a:
             print(json.dumps(st))
@@ -608,6 +778,8 @@ def main(a):
         notify_bg(st)
     elif cmd == "gui":
         sys.exit(gui(a[2:]))
+    elif cmd == "update":
+        sys.exit(update_all(a[2:]))
     elif cmd == "center":
         open_center()
     elif cmd in ("", "run"):

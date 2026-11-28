@@ -1,8 +1,8 @@
 import QtQuick 2.15
 
 // DarkShadow's Shell: the login screen (SDDM). Material 3, in the colors of your wallpaper.
-// Resting: your wallpaper and a big clock. Press a key or click: it wakes, the wallpaper blurs and the
-// login card comes up. rice-sddm sync puts your wallpaper, its colors and the shell's font in user/.
+// Resting: your wallpaper and a big clock. Press a key or click: it wakes and the login comes up over the
+// wallpaper. rice-sddm sync puts your wallpaper, its colors and the shell's font in user/.
 // Works on SDDM with Qt 6 and with Qt 5 (only QtQuick, no effects modules).
 Rectangle {
     id: root
@@ -147,7 +147,7 @@ Rectangle {
     Rectangle {
         anchors.fill: parent
         color: root.surface
-        opacity: root.awake ? (blur.status === Image.Ready ? 0.42 : 0.66) : 0.0
+        opacity: root.awake ? (blur.status === Image.Ready ? 0.5 : 0.66) : 0.0
         Behavior on opacity { NumberAnimation { duration: 600 } }
     }
     // resting: a gradient behind the clock
@@ -301,8 +301,9 @@ Rectangle {
                anchors.verticalCenter: parent.verticalCenter }
     }
 
-    // ---------------- the card ----------------
-    // a frosted glass card, like the shell's desktop widgets: translucent, a thin light edge, a soft shine on top
+    // ---------------- the login ----------------
+    // V6.95: no card behind it: the avatar, the name and the password sit on the wallpaper under the veil, and only
+    // the password field has a surface of its own
     Rectangle {
         id: card
         width: 424 * root.s
@@ -310,21 +311,16 @@ Rectangle {
         anchors.horizontalCenter: parent.horizontalCenter
         y: (root.height - height) / 2 + (root.awake ? 30 * root.s : 120 * root.s)
         radius: 30 * root.s
-        color: root.alpha(root.surfaceContainer, 0.25)
-        border.width: 1
-        border.color: root.alpha(root.outline, 0.10)
+        // V6.95: no box behind the picture: the avatar, the name and the password sit on the wallpaper and the
+        // veil, with only the password field as a surface
+        color: "transparent"
+        border.width: 0
+        border.color: "transparent"
         opacity: root.awake ? 1 : 0
         visible: opacity > 0
         Behavior on y { NumberAnimation { duration: 650; easing.type: Easing.OutExpo } }
         Behavior on opacity { NumberAnimation { duration: 400 } }
         transform: Translate { id: shakeT; x: 0 }
-        Rectangle {
-            anchors.fill: parent; radius: parent.radius; opacity: 0.6
-            gradient: Gradient {
-                GradientStop { position: 0; color: root.alpha(root.ink, 0.07) }
-                GradientStop { position: 0.5; color: "transparent" }
-            }
-        }
         SequentialAnimation {
             id: shake
             NumberAnimation { target: shakeT; property: "x"; to: -14; duration: 50 }

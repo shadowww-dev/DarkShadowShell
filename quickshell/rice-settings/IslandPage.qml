@@ -83,7 +83,7 @@ Item {
             Rectangle {
                 id: card
                 property real t: stage.big ? 1 : 0
-                Behavior on t { NumberAnimation { duration: stage.big ? 800 : 300; easing.type: stage.big ? Easing.OutBack : Easing.InOutCubic; easing.overshoot: 0.9 } }
+                Behavior on t { NumberAnimation { duration: stage.big ? 620 : 280; easing.type: stage.big ? Easing.OutBack : Easing.InOutCubic; easing.overshoot: 0.12 } }
                 readonly property real cw: stage.mode === "notif" ? 300 : 340
                 readonly property real ch: stage.mode === "notif" ? 70 : (stage.mode === "media" ? 130 : 150)
                 property real cwA: cw
@@ -93,10 +93,12 @@ Item {
                 width: Math.max(30, pill.width + (cwA - pill.width) * Math.max(0, t))
                 height: Math.max(20, 30 + (chA - 30) * Math.max(0, t))
                 anchors.horizontalCenter: parent.horizontalCenter
-                y: 17 + 38 * Math.min(1, Math.max(0, t))
+                // V6.85: the same peel as the island: it stays glued to the pill, the gap opens last
+                y: 17 + 30 + 8 * Math.max(0, Math.min(1, (t - 0.45) / 0.35))
                 radius: M3.sq ? 0 : (Math.min(height / 2, 15 + 9 * Math.min(1, Math.max(0, t))))
                 color: M3.surface
                 opacity: t < 0.02 ? 0 : Math.min(1, t * 4)
+                border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.16)
                 clip: true
                 // notification
                 Item { anchors.fill: parent; opacity: stage.mode === "notif" && card.t > 0.8 ? 1 : 0

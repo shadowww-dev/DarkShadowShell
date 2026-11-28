@@ -1,5 +1,191 @@
 # Changelog
 
+## V7.16: the island's date has no outline, a calmer Music module, a smoother Infinite Desktop
+- **The island's date pill has no outline.** The 1 px line drawn over the island read as a second edge; it is gone, more of the island shows through (0.34 alpha) and the pill is a little taller and wider so the row has room to breathe
+- **The bar's Music card content moves with the card.** It ran its own 760 ms stagger, so it was the only card still moving after the shape had finished opening; it now follows the card's open curve like Weather, System and Date, and its glass line is drawn only once it is clearly away, never across the strand
+- **The Music module is calm like the rest of the bar.** It was the only module that grew with an OutBack bounce and shrank on press; it uses the OutCubic width and the shared hover tint now
+- **A long app title no longer reaches the island.** It is cut at 40 characters and the module at 220 px (the rest is elided), so it stays clear of the middle
+- **Infinite Desktop is every screen by default.** A fresh install floats windows across all monitors (screens = 0), not only the workspace it was turned on
+- **SUPER + ALT drag is smooth.** Hyprland's window move animation chased each 16 ms target and lagged behind it, so the windows jumped in steps; it is turned off for the drag and put back when the mouse is let go
+- **A floating window stays on screen when Infinite Desktop is turned off.** A window such as Settings that stuck out a little came back half off the screen and looked gone; the whole rectangle is kept inside the usable area now
+- No other change
+
+## V7.15: the island opens on a hover again, one pill for the date, one updater
+- **Pointing at the island opens it again.** With nothing playing the pointer did nothing and a click opened Today; the island now opens Today on a hover by itself, and a click on the open card keeps it (it turns into a pinned one). While a song plays, hovering still opens the player
+- **The island's date is one piece.** The day was small capitals in your key color, the date plain bold text and only the time sat in a pill: three treatments side by side. All three share one pill now, the same size and the same ink, with a small calendar before the day (like the weather's cloud) and the island's own surface behind it, see-through
+- **The Music card the bar's Music module opens moves like the island.** It used to bounce (an OutBack overshoot) and start above the bar; it now stretches out of the module's pill inside the bar, joined with it, and only at the end pulls away while the strand thins, exactly like the Wi-Fi, Bluetooth, sound and power cards. Its cover is the desktop "Music card" widget's rounded square, the same picture component
+- **Lyrics and the player cross-fade.** Pressing the words / player chip used to swap the whole card in one frame; the two now fade and slide into each other over 200 ms
+- **A click on another module closes the Music card**, and so does a click anywhere else on the bar or the desktop, like the Wi-Fi and sound panels
+- **The island's equalizer is gone.** Four little bars bounced in the middle pill whenever music played, and again in the player card's corner. Both are removed (with the component), so nothing moves in the island but the cover and the time
+- **The words / player chip** was floating at 40 px on the card's right edge, over the cover's row and the wave. It sits in the card's top row now, beside the back arrow, the same size as it: a chip where a chip belongs
+- **The four bar menus now end inside the bar.** The card lands on the module's pill and fades over the last frames, like the island does; before, the last pill sat under the bar and popped
+- **One updater.** Settings > Update Center runs the same `rice-update update --terminal` as the island's About tab. It used to take the background path when no packages waited, so the same click did one thing from the island and another from here
+- **reflector runs once a week, not before every update.** The mirrorlist is kept for 7 days; `rice-mirrors --force` asks for a new one, and `RICE_MIRRORS_AGE` (seconds) changes the week. Sorting 20 mirrors by speed takes minutes, and rice-care asked for it before every update
+- No other change
+
+## V7.14: the Wi-Fi, Bluetooth, sound and power cards move like the island
+- **The other cards now do what the island does.** Wi-Fi, Bluetooth, sound and power used to just scale up 6% and slide 10 px out of the bar. Now the module's pill on the bar stretches into the card, flush with the bar, and only in the last third does the card pull away while the strand between them thins to nothing; closing is the same shape backwards
+- The card's glass line stays off while it is joined, so no line is drawn across the strand (the island's own fix)
+- The content keeps its place and is uncovered by the shape as it grows, so nothing jumps when the card lands
+- One new file, `DropCard.qml`, used by those four menus; the bar now tells `BarSvc` its edge and height, because the menus are other windows and cannot read them
+- Cards that open from the dock, a bottom bar or a side bar still grow and move, just without the strand (it only fits a bar at the top)
+
+## V7.13: the strand is a thread now, not a long sliver
+- **The long line was the strand itself.** Its bottom edge was the panel's whole top edge, so as it thinned it stayed a full-width sliver over the panel and never actually got smaller, then vanished in one frame. Its bottom is now a narrow flare into the panel, so the whole shape shrinks with the width and the last frames are a fraction of a pixel
+- The strand only starts once the panel has pulled away, so the first two thirds are still one silhouette with the pill (no seam), and closing runs the same shape backwards
+- No other change
+
+## V7.12: the join no longer has a seam, and the let-go fades out instead of cutting
+- **Why it looked stuck on:** the panel's glass hairline kept drawing a 1px line across the join while the droplet was still one shape with the pill. The hairline now stays hidden while the panel is flush with the pill or still joined, and fades in only once the panel is clearly away
+- **Smooth ending (and the reverse):** the panel is flush with the pill for the first two thirds, so the two are a single silhouette while it grows; in the last third it pulls away and the strand between them thins with a tail, so the final frames are already sub-pixel. Closing runs the same shape backwards
+- Nothing else changes
+
+## V7.11: the droplet stays joined to the island, then lets go
+- **The bridge you asked for:** the droplet leaves the pill as one liquid shape with it, widens into the panel while still joined, and only then the bridge pinches off in the last ~14% of the motion, so the panel detaches and settles on its own
+- The bridge is a single `ShapePath` (one filled path, same fill as the card), so the droplet, the bridge and the panel are one colour and one layer. `QtQuick.Shapes` is already used by the bar and the screen frame
+- 520 ms, `InOutCubic`
+
+## V7.10: the droplet drops, then widens into the panel (plain rectangle, no Canvas)
+- **The motion you asked for:** a small droplet (46 px) comes off the pill and drops ~16 px, then it **opens up into the full panel at the end** (width and height grow together, corners from a circle to the panel). The content fades in as it opens
+- **One rectangle, one color.** The droplet is the card at its small size, so droplet and panel are literally the same layer and the same color; nothing can differ (and there is no Canvas, which is what crashed the shell in V7.08)
+
+## V7.09: roll back the V7.08 card Canvas that crashed the shell
+- **The shell is back.** The V7.08 card was drawn from one Canvas path; that is what stopped the bar, the dock and the island from loading (the shell crash-looped). This puts the V7.07 card back, which rendered fine
+- The drop animation work moves to a safer approach; nothing else changes
+
+## V7.08: the island droplet and the card are one shape, one color
+- **No color difference between the droplet and the panel.** The neck and the card body are now painted as a single path in one fill, so they are exactly the same color and alpha. Before, they were two translucent layers (the surface is 90% opaque) and where they met it was darker, so the droplet read as a different color stuck on a ready panel
+- **The whole panel is drawn out of the island.** It unrolls from no height to full height by ~70% of the 500 ms, then the neck (the droplet) pinches off and the card sits 16 px below; the content is revealed by the clip, so it is drawn, not faded in
+
+## V7.07: the island card is drawn out of the island, not a drop on a ready panel
+- **The whole card appears with the animation.** It starts on the pill with no height and unrolls down to its full height as the drop falls; the content is revealed by the clip from the top down. Before, the panel was already full size and only a small drop moved onto it
+- Width is full from the first frame, so there is still no small shape that widens first; the neck keeps the unrolling card one shape with the island until it pinches off
+
+## V7.06: the island card draws in with the drop, in the island's own colors
+- **The menu is drawn together with the animation, not already there.** The card and its content fade in over the first half of the 500 ms drop, so the menu is revealed as the card falls; before, the card was at full opacity after ~80 ms and only the last frames were seen, which read as a card that was already there
+- **The drop and the neck use the island's own color and opacity.** The neck fades with the card, so the shape that peels off is the same glass as the pill, not a separate solid blob
+
+## V7.05: the island's drop takes 500 ms, not 280
+- **The drop is no longer a blink.** 280 ms made the 20 px fall and the neck read as a single flash; the card now hangs attached for the first ~100 ms, the neck stretches, and it lands over 500 ms in all. The light sweep is 500 ms too
+
+## V7.04: the island hangs for a moment, then the drop falls 20 px
+- **The drop is visible now.** The card is full size and attached to the island; for the first part of the 280 ms it just hangs there, then the neck stretches and pinches off while it falls 20 px (InOutCubic: still start, soft landing). V7.03 fell only 8-14 px with an ease that did most of it in the first 60 ms, so it read as "it appears"
+- The neck starts as wide as the pill and narrows to nothing as the card lands; the bottom bar's card also sits above the bar again (it was offset by a bar height)
+
+## V7.03: the drop leaves a neck behind, and the island's beat light stays inside the pill
+- **The card is one shape with the island until it snaps off.** It starts attached (no gap), falls 14 px, and a liquid neck between the pill and the card pinches off on the way; before, the full-size card only faded in and slid 8 px with no visible connection, so it read as "it just appears"
+- **The music beat light no longer hangs under the island.** The Vibe breathing edge was drawn around the pill, so the part below it showed as a colored fringe outside the bar; it is now inside the pill
+
+## V7.02: the island card drops off the bar already wide, in 250 ms
+- **No small start that widens.** The card is its full size on the first frame and sits on the island; what moves is the drop that detaches it (8 px, over the whole motion) and its corners. The old width/height growth from the pill made a tiny shape appear and the rest widen after it
+- **2.5x faster:** 250 ms in and out (620 ms in V6.98, 400/320 in V6.99); the light sweep is 250 ms too
+
+## V7.01: the island card peels off the pill again (the V6.98 motion)
+- **The card's motion is back to what it was in V6.98:** 620 ms in and out, the clamped start so it grows out of the pill and stays glued to it while it peels away, and the light sweep at 620 ms. V6.99 shortened it to 400/320 ms and started it as an exact copy of the pill, so the panel read as a block growing out of the island instead of the island peeling off the bar
+- The words screen from V6.99 stays: wider, the cover in your shape, the glow and the volume line
+
+## V7.00: the update lock cannot be kept by the shell any more, and the audit's data-loss and race fixes
+- **The update lock was handed to the shell the installer starts, and kept forever.** The lock is file descriptor 9; bash gives it to every child. The Quickshell and bar started at the end of an update kept it open, so the next update was refused with "Another update is already running" with no update running, and the button looked dead. Every program the installer starts now closes it
+- **A dry run no longer deletes the retired dashboard pages**, and `rice-gpu.lua` goes to the backup before it is rewritten or removed (a custom line in it was lost before)
+- **A check answer is written whole:** the watch loop and the About tab could read half of `update.json` while it was being written and show a fresh error
+- **Flags reach the terminal:** `rice-update update --no-upgrade` used to drop `--no-upgrade` when the update went to a terminal
+- **The niri canvas state is written whole** (a crash mid-write made every floated window stay floating with no record), and a refused niri action no longer adds the same window id every 0.6 s
+- **A failed Hyprland read is no longer reported as an empty desktop**, so the widgets and the auto-hiding bar do not cover tiled windows until the next event
+- **A clean-up or update script is named per run:** a second run could rewrite the file the first terminal's bash was still reading
+- **waybar-autohide** ran `pgrep` twice every 70 ms (~28 processes a second) for a pid that changes once a session; it is checked once a second now
+- The lyrics volume line waves only while the song plays
+
+## V6.99: the island's cards grow out of the pill, and its words get a panel of their own
+- **Update now starts its terminal at once.** The island and the Update Center asked `rice-care` for the packages first (checkupdates, Flatpak, Snap and the AUR can take minutes), so a click did nothing visible; both now tell the updater which path they are. A terminal that cannot start falls back to the next one instead of being counted as an update in a window that never opened
+- **The card grows out of the island instead of showing a wider copy of it under the bar.** At the first frame it was clamped to the bar height and placed just below the pill, so a slightly wider pill flashed there before the motion: it now starts exactly as the pill (same width, height and corners) and the motion is shorter (400 ms in, 320 ms out; 620 ms before)
+- **The words screen is a panel of its own:** wider, the cover in your shape top left, a soft glow on the lyrics, the play button moved beside a volume line you can drag
+
+## V6.98: a dead update no longer leaves the update screen stuck on "running"
+- **When the update process is gone, its state is cleared.** A killed update or a reboot left `update-live.json` on "running" with no process behind it: the Update Center button ignored every click and Settings opened on the update page with a spinner that never ended. Any read of the state (the Update Center, the badge) now checks the recorded pid and turns a dead "running" or "terminal" into "failed", so the buttons work again
+- No process to find in `ps` is the clue: only the state file was left
+
+## V6.97: Update now works again after an update in a terminal
+- **The terminal that ran the update waits at "Press Enter to close" after it finishes.** It is still a live process, so its pid counted as "an update is running": Update now opened nothing, and the same block stopped Settings > Update Center. The updater now believes a pid only if its command line is the updater, and a finished update (its live state says done) never counts, even with the window still open
+- **A finished update no longer leaves a false "updating in a terminal".** The new terminal marks the state before the window opens, so the next click does not overwrite the "running" the terminal reports, and a terminal that could not be opened says it failed instead
+
+## V6.96: SUPER + SHIFT + F really makes the window fullscreen
+- **The key asked with the old dispatcher, and with mode 1.** A Hyprland with the Lua config (0.55 and newer) refuses the old dispatcher names, and mode 1 means maximize: the window only filled its tile, so it looked as if nothing happened. The key now calls the Lua fullscreen (toggle, full screen) directly
+
+## V6.95: the cards fold back, the player shows the words, and the login screen is clean
+- **A card closes the way it opens, backwards.** Closing was a quick InOutCubic over 280 ms while opening was an OutBack over 620: the panel vanished instead of folding back. The way out now takes as long as the way in and plays the same curve reversed. Applies to the island, the bar's cards, the Wi-Fi / Bluetooth / sound / power menus and the control center
+- **The tab strip and the "You are up to date" box are glass, not slabs.** They sat on the solid card color: two dark bands on the card. Both keep the card's color with its transparency
+- **The date is a small weekday, a dot and the day.** "Fri, 27/11" was one grey line; the weekday is now small capitals in your key color, a dot, then the date in the numbers font beside the time pill
+- **Lyrics in the player, and an arrow back.** A Lyrics pill turns the player into the song's words (the same line-by-line view as the music card); the arrow above it returns to Today / System / About without closing the island
+- **The sound, Wi-Fi and Bluetooth panels use the bar's surface.** They made their own fixed 0.94 panel in near-black 5 %: next to the island they read as a different, darker material. The bar now publishes its opacity and every menu and the volume pill use the same surface and alpha as the island
+- **The login screen keeps the wallpaper sharp and drops the box behind the avatar.** The blurred copy was made tiny and blurred hard (0x10, then scaled back up), so the screen was a smear; sync no longer makes it and removes the old one. The avatar, name and password now sit on the wallpaper under the veil, with only the password field as a surface
+- **Apps that add themselves to autostart now start.** Hyprland and niri started only what their config names; an app with "Launch at startup" (Mullvad VPN and most GTK / Electron apps) writes `~/.config/autostart/<app>.desktop` and nothing ran it. `rice-autostart` reads the system and user XDG autostart folders at login (the user's file wins; Hidden, OnlyShowIn and X-GNOME-Autostart-enabled respected) and both configs call it
+- **Infinite Desktop no longer loses a window on the way out.** A window given its canvas place while the view was panned had numbers that mean nothing at 100 %: turning it off put the window outside the screen. Both ways now check the place against the window's screen and bring anything outside to the middle
+- **A tray app's 1x1 helper window is not in the Task view.** Mullvad VPN and the like can leave one mapped; it drew a blank card and picking it focused nothing. Windows smaller than 48 px, or with no class and no title, are left out
+
+## V6.94: a fullscreen key, for the game that shrinks itself
+- **SUPER + SHIFT + F makes the focused window fullscreen** (press it again to go back). Meant for a game that shrank itself and no longer takes its own fullscreen or borderless setting: the key asks the window manager, not the game. Change it in Settings > System > Keybinds (the pencil next to it) or see it in SUPER + /; Hyprland and niri both
+
+## V6.93: a shell restart no longer checks GitHub again
+- **The background update check remembers when it last ran.** It checked 45 seconds after every start, and the shell restarts after every update or reload: a push made in between brought a new "Update is Available!" within a minute, as if it checked on every push. The last check time is kept in the saved state, so a restart waits out the configured interval (once a day by default, `every_minutes` in `~/.config/rice/update.json`, 60–10080)
+- **A check from the About tab or the Update Center also counts**, so the next automatic one is a full interval later, not a moment after
+
+## V6.92: the bar does not jump when a card opens
+- **The bar keeps one window size, the screen's, from the first frame.** Since V6.85 the window grew to the whole screen while a card was open so a click outside could close it. That resized the layer surface under the bar, and the bar's parts are placed from its height: with the bar at the bottom, the whole bar (left, middle and right) moved for a frame before the card's own animation — the odd jump. The mask still keeps the pointer off everything but the bar and the open card, so a click outside still closes it
+
+## V6.91: Update does not sit forever on a terminal that closed
+- **A terminal that went away no longer counts as a running update.** The background update leaves `terminal` in its live state, with no process behind it; after a terminal was closed, crashed or killed, every later Update in Settings returned "already updating" at once — the card stayed on "Updating..." and no terminal opened. The state now counts only while that terminal's process is alive (a terminal that hands its window to another process counts while its marker is fresh)
+- **Package updates open a terminal again after one was closed**, instead of taking the 60-second marker for "a terminal opened a moment ago" and doing nothing
+
+## V6.90: the login screen gets in on the update that finds it missing
+- **An update installs the login screen when SDDM is the display manager but the theme never got in.** The update only ever refreshed a theme that was already in `/usr/share`; a session where an earlier update could not ask for the password kept SDDM's own look for good. Now the missing theme counts as something to put in
+- **The password window is given a moment to appear.** After the shell starts its polkit agent, `pkexec` was asked at once and could find no agent yet; it now waits up to 3 seconds before falling back to a terminal
+
+## V6.89: the login screen can be put in without logging out first
+- **An update now installs the new SDDM theme in the same session.** The password window needs a polkit agent, and the shell only started one at login since V6.86: a session that began before that had none, so the theme step could not ask and kept the old look. `rice-sddm` starts the agent itself (`rice-services polkit`) before pkexec, so Settings and the updater can put the theme in right away
+
+## V6.88: the shapes stay, the island does not jump, and the words sit on the card
+- **The cover is a rounded square in the bar's music card only.** The island's player and the Control Center's (where your notifications are) got the shape back: cropped into a cookie the cover lost its edges only in that one small card, and the rest never needed changing. The Control Center's song text is back to 15/12 as well
+- **Clicking the island no longer makes it jump.** The click also started the "a drop landed" squeeze (9% flatter, with a bouncy return) while the card grew out of the pill, so the island seemed to jump up and snap back before the real animation. The squeeze stays for notifications and the volume/workspace flashes
+- **The lyrics block is see-through and the words glow.** It was a solid panel next to the glass card; it now lets the card through (42% of the chip color) and the line being sung gets a soft glow in the song's color
+
+## V6.87: the updater stops calling its own hand-off a failure
+- **A second click no longer breaks the update.** While the terminal that the Update Center opened was still waiting for your `y`, another click reported "no terminal could be opened" and the page turned it into a 1-second failure ("The update did not finish"). That guard is the same update: the page now keeps saying it continues in the terminal
+- **"Another update is already running" says where it is.** The lock is real (one installer at a time), and the process holding it is usually the terminal that Settings opened, waiting for your answer: finish it there or close that terminal, then run again
+- **The AUR note no longer starts with "Shown only:"** and is translated: "not updated here, unless the shell needs the package"
+
+## V6.86: the island opens small, the login screen asks, and updates finish where they start
+- **The island opens without the block.** The card's size overshot its own size by a lot and then shrank back, which read as one big block puffing up and collapsing. The overshoot is now a small spring (0.12, was 0.9): it grows into the card, the gap to the pill opens at the end and the content rises, with nothing to shrink back. The preview in Settings > Island uses the same spring
+- **The right-hand corner menus move like the island too.** Wi-Fi, Bluetooth, volume and power still eased on their own old curve with a 26 px slide. They now share the island's motion: 620 ms with a small overshoot on the way in, 280 ms out (340 in Light mode), a 0.94 scale that settles, and the 8 px gap to the bar opening only at the end so the card peels off instead of jumping away
+- **Album art is a rounded square now, cropped to fill** in the bar's music card, the island's player and the Control Center: the cover was cut into your picked shape, so a cookie or a flower ate the edges of the picture. The corners follow Minimal mode (square there); a note shows when there is no cover
+- **The login screen's theme can be installed again.** pkexec answered "authentication is needed to run ... as the super user" because no polkit agent was running: Hyprland's autostart never started one (niri did). It starts at login now (`rice-services polkit`), and `rice-sddm` falls back to a terminal for the password when no agent answers, instead of failing quietly
+- **An update that changes the installer finishes where it starts.** The Update Center treated the terminal hand-off as a failure ("The update did not finish") and needed a check and a second click after the terminal was done. That state is now "Continuing in the terminal", and the terminal's rice-update reports running and done, so the page follows it and ends on its own; the same reporting covers an update with system packages, which also runs in a terminal
+- **The song lyrics wear the shell's type.** The line being sung was ExtraBold with tight tracking, a type that read as someone else's next to the cards (it was the same in the music card, the Lyrics widget and the desktop words). It now uses your reading font (Settings > Fonts) at the DemiBold weight the rest of the shell uses, with even spacing
+- **"Shown only" says what it means:** "not updated here" (the AUR, NixOS and rpm-ostree counts are shown, not updated by the shell)
+
+## V6.85: menus that let go, one icon size, and a music card in the island's clothes
+- **A menu closes when you click outside it.** The bar's cards (weather, music, date) and the tray menu stayed open over other windows: the click that was supposed to close them reached the app under it, because the bar's click catcher lay under the windows. While a card is up the bar's window now covers the screen, so any click outside closes the card and is spent there, not in the app behind it. The corner menus (Control Center, Wi-Fi, Bluetooth, volume, power) already closed on a click outside; they keep that, and lose the keyboard grab below
+- **An open menu no longer takes the keyboard.** The bar, the Control Center and the corner menus grabbed it while open, so every key went to the menu's Esc handler and nothing could be typed in the app behind it until the menu was noticed and closed. They leave the keyboard alone now; the Wi-Fi password field is the only thing that asks for it
+- **The corner panel opens like the island**: the same 620 ms with the same soft overshoot (and a quick 280 ms on the way out), the panel stays near the bar while it opens and the 8 px gap opens at the end, with the thin glass edge and one sweep of light over the surface. The preview in Settings > Island uses the same timing
+- **The music card wears the island's clothes.** Its title is the island's 17 semibold and its artist 13 (it was a tight 19), the cover fills the shape you picked in Settings instead of a square picture inside a second, turning shape that showed at the sides, and the volume line under the buttons can be dragged or tapped now, not only the +/- buttons
+- **The bar's icons are one size** (18): the volume icon was 22 and the battery and the music note 16 next to Wi-Fi and Bluetooth at 18, so they read as three different sets
+- **The island's player card has the same surface** as Today, System and About: a key-color gradient over it made it look lighter. The player's card is now the island's own surface, like every other card
+
+## V6.84: your wallpaper stays, the live one keeps playing, and Auto is yours
+- **The launcher's app icons sit on the shape you chose** (Edit mode > Icons): it drew its own default (or a cookie on the frequent apps) while the dock used your shape. Both read the same setting now, and the dock's own shape and the pill style's squircle next to it
+- **"Auto" follows your wallpaper again.** The cover of the song that plays repainted the shell whatever scheme you picked, so your grey came back as the album's colors on the next song. The cover's colors now belong to Auto only, and Auto has a choice next to it: **Your wallpaper** (as it always did) or **Now playing**
+- **An update no longer crashes the shell.** The installer swapped the shell's files under a running Quickshell, which reloads after every change: a reload between two swaps read a mix of old and new files, died, and the restart loop gave up until the next session (the reason a PC restart helped). The shell is stopped for the swap and started again once every file is in place
+- **An update keeps your wallpaper.** It put a random one of ours on when the remembered picture was gone, and could delete a retired wallpaper while it was on your screen. The one you pick is remembered (`~/.config/rice/wallpaper`), put back by an update, and never removed while it is shown
+- **The island's card peels off the pill**, Apple's liquid glass way: it grows out of the island and stays glued to it while it opens, then the gap opens and it detaches; the corners lead, a thin glass edge and one sweep of light run over the surface, and the card's content rises and sharpens once the surface is open (it used to pop in, and the card's corners leaked)
+- **A live wallpaper keeps playing when the colors change.** The color scheme ran the wallpaper script on the video, which stopped mpvpaper and left a still PNG. It now colors from the video's still frame and leaves the wallpaper alone
+
+## V6.83: one Update Center, and packages from every supported distro
+- **Settings > Update Center and the dashboard's About tab do the same thing** (they did not): both show the shell, the system's packages, Flatpak and Snap, and the AUR ones, and both press the same button. One call decides: the shell updates in the background when nothing else waits, or everything runs in a terminal when packages do (they need your password)
+- **AUR packages are only shown.** An update no longer runs `paru -Syu`/`yay -Syu` (one broken build could take the rest with it); the packages the shell itself needs are the only ones `install.sh` upgrades, and it says so
+- **Every supported distro has its packages in the Update Center**: Arch (and CachyOS, Endeavour, Garuda, Artix), Fedora (`dnf`), Gentoo (`emerge`, after `emaint sync -a`), Void (`xbps`), openSUSE (`zypper`) and Debian/Ubuntu (`apt`), next to Flatpak and Snap. NixOS and the atomic Fedoras are shown with their own command (`nixos-rebuild`, `rpm-ostree`) and never run from here
+- **reflector picks the mirrors before every pacman update**: the 20 freshest HTTPS mirrors in Poland, Germany, Czechia and the other countries without a name for tampered mirrors, sorted by speed. reflector is installed first when it is missing, and a failed run leaves the mirrorlist you have. On Artix only Arch's list (`mirrorlist-arch`) is replaced, so the Artix repositories keep their mirrors
+- **Snap is checked and updated too**, next to Flatpak and the system's packages; Care keeps the cleaning and the backup, updates live in one place
+- The package check waits long enough for the slow ones (`dnf` cold metadata, `emerge --pretend`), so an update that has packages no longer starts in the background
+
 ## V6.82: Frame fixed for real
 - **Frame**: the bar sat a whole bar higher than the edge, with the wallpaper under it. Quickshell sets a window back to "keep clear of the others" whenever its reserved room is set, so the bar's "ignore the others" did not hold and it moved above the room the frame keeps for it. The bar now asks for that directly (`exclusiveZone: -1`), so it lies on the edge, corner to corner, and the frame joins it
 
@@ -38,7 +224,11 @@
 - **Equalizer** (Settings > Sound & language > Equalizer): Flat, Bass, Treble, Voice, Loudness, Headphones, Gaming and Night, with a curve that glides from one to the next. It works through EasyEffects (`sudo pacman -S easyeffects`, `rice-eq`)
 - **A card after a screen recording** (like the one after a screenshot): play it, **trim** it (a strip of its frames with two handles: save the part between them, or make a GIF of just that part), a GIF of all of it, copy, the folder, delete
 - The ideas of the bar styles page come from apolloKapa's monolith shell (the code is our own)
+
 ## V6.57: the second audit
+- **An update brings the new login screen.** The theme in `/usr/share` kept the old look until Settings asked: it only got the wallpaper, so the installer now sees the newer files (not only the `.qml` ones) and puts the whole theme in
+- **Widgets stay on the Infinite Desktop.** Auto-hide counted a window on the canvas, even one far off the screen, as a window covering the desktop; that is why they only showed in Edit mode. On the canvas they float, so auto-hide leaves them alone, and a window that is not on the screen no longer counts
+- **The dock's pin button starts off.** Settings > Interface > Show pin button turns it on
 - **An update can no longer run new code without asking.** The "this changes the installer" question covered `install.sh` and `install/lib`; the installer also runs `install/patches` and the `bin` scripts it just pulled, so a change there opens the same question now
 - **An update comes only from `github.com` itself.** An address that merely has `github.com` somewhere in its path (another host, a fork page) is refused, in the installer and in rice-update
 - **A restore keeps what it replaces.** `./install.sh --restore` saves your current files first, so the changes made since the backup are not lost
@@ -53,6 +243,7 @@
 - The wallpaper and the bar and dock still follow the move, live (the config writes the canvas place to a small file in the runtime folder, which the shell reads; before it, rice-canvasd sent it over a socket)
 - **The push at the edge** (SUPER + drag a window against the edge, the others come towards it) still reads the mouse directly, so it still needs the group: it is the one part that needs the movement past the edge of the screen. Its setting is hidden where it cannot work. On Hyprland 0.55 the whole mouse needs the group, as before
 - NixOS: `programs.shadows-shell.inputGroup = true` is only for that push now
+
 ## V6.55: Styles, profiles, a new screenshot tool and screen time
 - **11 new styles** in Settings > Appearance > Themes: the palettes everyone knows (**Catppuccin**, **Rosé Pine**, **Tokyo Night**, **Gruvbox**, **Nord**, **Everforest**, **Kanagawa**) and four of our own: **Luxe** (gold on black), **OLED** (true black), **Brutal** (square, thick borders, no softness) and **Sakura** (blossom pink). A style now also brings its notifications' colors, the lock screen look and the minimal mode, and gives back yours when you move to a style that does not set them. A ring of the new color sweeps over the screen when one goes on. New color schemes: Catppuccin, Rosé Pine, Tokyo Night, Gruvbox, Nord, Everforest, Kanagawa and Dracula
 - **Settings show what you changed**: a small dot next to every setting that is not at its default, and a button to put it back with one click (107 settings in Bar, Desktop, Idle, Interface, Island, Notifications, Recorder, Launcher, Sounds and Vibe)

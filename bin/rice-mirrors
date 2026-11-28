@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# rice-mirrors: the Arch mirrorlist before a package update. reflector picks the 20 freshest HTTPS mirrors in
+# countries that are not known for tampered mirrors, sorted by speed; the old list is replaced only when the new
+# one was really written. reflector is installed first when it is missing.
+# Run as your user: it asks for your password (sudo), never runs as root itself.
+# Artix keeps its own mirrors in mirrorlist and Arch's in mirrorlist-arch: there only the Arch list is replaced.
+COUNTRIES="Poland,Germany,Czechia,Slovakia,Austria,Hungary,Slovenia,Croatia,Netherlands,Belgium,Luxembourg,France,Denmark,Sweden,Norway,Finland,Iceland,Switzerland,Ireland,United Kingdom,Canada,United States,Japan,South Korea,Taiwan,Singapore,Australia,New Zealand,Estonia,Latvia,Lithuania"
+MDIR="${RICE_MIRRORS_DIR:-/etc/pacman.d}"          # RICE_MIRRORS_DIR / RICE_MIRRORS_CONF: the tests' copies
+CONF="${RICE_MIRRORS_CONF:-/etc/pacman.conf}"
+if [ -f "$MDIR/mirrorlist-arch" ] || grep -qs 'mirrorlist-arch' "$CONF"; then
+  LIST="$MDIR/mirrorlist-arch"                     # Artix: its own repos keep the mirrorlist they have
+else
+  LIST="$MDIR/mirrorlist"
+fi
+
+have() { command -v "$1" >/dev/null 2>&1; }
+say() { printf '%s\n' "$*"; }
+# macOS has no timeout: there reflector simply runs without it
+to() { if have timeout; then timeout 120 "$@"; else "$@"; fi; }
+
+# V7.15: reflector sorts 20 mirrors by speed, which takes minutes, and rice-care asked for a new list before every
+# update. A list is good for a week; --force (or RICE_MIRRORS_AGE=0) picks new ones now
+AGE="${RICE_MIRRORS_AGE:-604800}"
+FORCE=0
+[ "${1:-}" = "--force" ] && FORCE=1
+if [ "$FORCE" != 1 ] && [ "$AGE" -gt 0 ] 2>/dev/null && [ -s "$LIST" ] &&
+   [ -n "$(find "$LIST" -mmin -$((AGE / 60)) 2>/dev/null)" ]; then
+  say "mirrors: keeping the list picked $(date -r "$LIST" '+%d %b %H:%M' 2>/dev/null || echo 'recently') (--force picks new ones)"
+  exit 0
+fi
+
+install_reflector() {
+  if have pacman; then sudo pacman -S --needed --noconfirm reflector >/dev/null 2>&1
+  elif have dnf; then sudo dnf install -y reflector >/dev/null 2>&1
+  elif have xbps-install; then sudo xbps-install -Sy reflector >/dev/null 2>&1
+  else return 1
+  fi
+}
+
+if ! have reflector; then
+  say "reflector is not installed: getting it"
+  install_reflector || { say "reflector could not be installed: your mirrors stay as they are"; exit 1; }
+fi
+have reflector || exit 1
+
+tmp="$(mktemp)"
+trap 'rm -f "$tmp"' EXIT
+# a broken reflector or one that finds nothing must leave the working list alone
+if ! to reflector --country "$COUNTRIES" --protocol https --latest 20 --sort rate --save "$tmp" >/dev/null 2>&1 ||
+   [ ! -s "$tmp" ] || ! grep -q '^Server' "$tmp"; then
+  say "reflector made no list: your mirrors stay as they are"
+  exit 1
+fi
+if ! sudo install -m 644 "$tmp" "$LIST"; then
+  say "the new mirrorlist could not be written: your mirrors stay as they are"
+  exit 1
+fi
+say "mirrors: $(grep -c '^Server' "$LIST") from $COUNTRIES"

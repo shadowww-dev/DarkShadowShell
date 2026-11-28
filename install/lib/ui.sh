@@ -54,12 +54,14 @@ task() {
   if [ "$IS_TTY" != 1 ]; then
     # Settings > Update Center reads this output live: there the step shows as running until ✔ or ✘ comes
     [ "${RICE_GUI:-0}" = 1 ] && printf '    ▶ %s\n' "$msg"
-    if "$@" >>"$LOG" 2>&1 </dev/null; then ok "$msg"; return 0; else fail "$msg  (details: $LOG)"; return 1; fi
+    # 9>&-: fd 9 is the installer's update lock. A long-lived child (Quickshell, the bar) that inherited it kept the
+    # lock for as long as it ran, so the next update was refused with "Another update is already running" (V7.00)
+    if "$@" >>"$LOG" 2>&1 </dev/null 9>&-; then ok "$msg"; return 0; else fail "$msg  (details: $LOG)"; return 1; fi
   fi
   local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏') i=0 pid rc t0
   t0=$SECONDS
   { echo; echo "### $msg"; } >>"$LOG"
-  "$@" >>"$LOG" 2>&1 </dev/null &
+  "$@" >>"$LOG" 2>&1 </dev/null 9>&- &
   pid=$!
   hide_cursor
   while kill -0 "$pid" 2>/dev/null; do

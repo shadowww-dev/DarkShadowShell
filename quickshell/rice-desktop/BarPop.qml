@@ -1,6 +1,7 @@
 import Quickshell
 import Quickshell.Io
 import QtQuick
+import QtQuick.Shapes
 
 // The small cards the bar's own modules open under them (Bar layout > Music, Weather, System, Date):
 //   music     the song, its lyrics, the progress and the buttons (MusicPop.qml)
@@ -26,12 +27,15 @@ Item {
     // the module it grows out of: its width on the bar and the bar's height (the card starts as that pill)
     property real fromW: 60
     property real barH: 38
-    // t: 0 closed .. 1 open. Like the Dynamic island: the module's pill stretches out of the bar into the card
-    // (a soft overshoot), the corners round off, and the content comes in once there is room for it
+    // t: 0 closed .. 1 open. Like the Dynamic island: the module's pill stretches out of the bar into the card (it
+    // stays joined with the bar for the first two thirds), the corners round off, and the content comes in once
+    // there is room for it
     property real t: 0
-    onOpenChanged: { tAnim.stop(); tAnim.to = open ? 1 : 0; tAnim.duration = open ? (Look.lite ? 260 : 560) : (Look.lite ? 150 : 260)
-        tAnim.easing.type = open ? Easing.OutBack : Easing.InCubic; tAnim.start() }
-    NumberAnimation { id: tAnim; target: bp; property: "t"; easing.overshoot: 0.9 }
+    // V7.15: the Dynamic island's own motion (520 ms InOutCubic, both ways), so the Music card opens and closes like
+    // the island's cards and the bar's menus; OutBack/InBack bounced the whole card, which the island never does
+    onOpenChanged: { tAnim.stop(); tAnim.to = open ? 1 : 0; tAnim.duration = Look.lite ? 240 : 520
+        tAnim.easing.type = Easing.InOutCubic; tAnim.start() }
+    NumberAnimation { id: tAnim; target: bp; property: "t" }
     // a new card while one is open (another module): the content cross-fades
     onKindChanged: { swap.restart() }
     property real cf: 1
@@ -41,7 +45,7 @@ Item {
     Behavior on width { enabled: bp.t > 0.98; NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
     height: (kind === "weather" ? wxCol.implicitHeight : (kind === "system" ? 228 : (kind === "music" ? musicCol.implicitHeight : calCol.implicitHeight))) + 28
     Behavior on height { enabled: bp.t > 0.98; NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
-    x: Math.max(8, Math.min(areaW - width - 8, ax - width / 2))
+    x: Math.max(12, Math.min(areaW - width - 12, ax - width / 2))
     readonly property color fg: pal ? pal.fg : "#ECEDEE"
     readonly property color dim: pal ? pal.dim : "#A9ADB2"
     readonly property color acc: pal ? pal.primary : "#9ec9bd"
@@ -63,31 +67,81 @@ Item {
         return o
     }
 
-    // the shape: from the module's pill on the bar (k = 0) to the whole card (k = 1)
-    readonly property real k: Math.max(0, t)
-    readonly property real k1: Math.min(1, k)
-    readonly property real pillH: Math.max(24, barH - 10)
+    // V7.15: the same timeline as DropCard (the Wi-Fi, Bluetooth, sound and power menus, and the island): the pill
+    // grows joined with the bar, and only at two thirds does it pull 8 px away while the strand thins to nothing.
+    // It used to start as a pill above the bar and drop in, which is why the Music card did not move like the rest
+    readonly property real tc: Math.max(0, t)
+    readonly property real openE: { const p = Math.max(0, Math.min(1, (tc - 0.08) / 0.64)); return p * p * (3 - 2 * p) }
+    readonly property real dp: { const p = Math.max(0, Math.min(1, (tc - 0.66) / 0.34)); return p * p * (3 - 2 * p) }
+    // the same 26 px pill the DropCard menus start from (the island's own is a little shorter)
+    readonly property real pillH: Math.min(26, Math.max(22, barH - 10))
+    // the bar's near edge is 8 px above this item (it is placed barH + 8 under the bar, or -height - 8 above a
+    // bottom one). The pill is the module's pill inside the bar: centered on it, so it starts at the bar's far edge
+    readonly property real hang: down ? -8 : height + 8
+    readonly property real pillTop: (down ? -8 - barH : height + 8) + (barH - pillH) / 2
+    readonly property real baseY: pillTop + (hang - pillTop) * Math.min(1, openE * 3)
+    readonly property real sy: baseY * (1 - dp)
+
+    // ---------- the strand: one shape with the bar until the card lets go ----------
+    Shape {
+        id: strand
+        x: shape.x
+        y: shape.y - height
+        width: Math.max(1, shape.width)
+        height: Math.max(0, bp.down ? shape.y + 8 : 0)
+        readonly property real tw0: Math.min(width * 0.62, bp.fromW * 0.9)
+        readonly property real letgo: Math.max(0, Math.min(1, (bp.tc - 0.55) / 0.45))
+        readonly property real tw: tw0 * Math.pow(1 - letgo, 2.2)
+        readonly property real cx: Math.max(4, Math.min(width - 4, bp.ax - bp.x - shape.x))
+        readonly property bool joined: bp.down && bp.tc > 0.02 && height > 0.05 && tw >= 0.15
+        visible: joined
+        preferredRendererType: Shape.CurveRenderer
+        ShapePath {
+            fillColor: bp.pal ? bp.pal.surface : "#141414"
+            strokeColor: "transparent"
+            fillRule: ShapePath.WindingFill
+            PathSvg { path: {
+                const W = strand.width, H = strand.height, tw = strand.tw
+                if (H < 0.05 || tw < 0.15 || W < 1) return ""
+                const cx = strand.cx, tb = Math.min(W, tw * 1.45)
+                const midUp = H * 0.52, midDn = H * 0.58
+                return "M" + (cx - tw / 2) + " 0" +
+                  " C" + (cx - tw * 0.42) + " " + midUp + " " + (cx - tb * 0.5) + " " + midDn + " " + (cx - tb / 2) + " " + H +
+                  " L" + (cx + tb / 2) + " " + H +
+                  " C" + (cx + tb * 0.5) + " " + midDn + " " + (cx + tw * 0.42) + " " + midUp + " " + (cx + tw / 2) + " 0 Z"
+            } }
+        }
+    }
+
     Item {
         id: shape
         readonly property real cx: bp.ax - bp.x
-        width: bp.fromW + (bp.width - bp.fromW) * bp.k
-        height: bp.pillH + (bp.height - bp.pillH) * bp.k
-        x: cx + (bp.width / 2 - cx) * bp.k1 - width / 2
-        // it starts on the bar, over the module, and drops into place
-        readonly property real y0: bp.down ? -8 - bp.barH / 2 - bp.pillH / 2 : bp.height + 8 + bp.barH / 2 - bp.pillH / 2
-        y: bp.down ? y0 * (1 - bp.k) : y0 + (bp.height - height - y0) * bp.k
-        opacity: Math.min(1, bp.t * 3)
+        width: bp.fromW + (bp.width - bp.fromW) * bp.openE
+        height: bp.pillH + (bp.height - bp.pillH) * bp.openE
+        x: cx + (bp.width / 2 - cx) * bp.openE - width / 2
+        y: bp.sy
+        // it lands on the module's pill inside the bar and fades there over the last frames
+        opacity: Math.min(1, bp.t * 6)
         clip: true
-        Shadow { anchors.fill: bg; radius: Look.sq ? 0 : (bg.radius); on: Look.shadows && Look.shadowPanels; size: Look.shadowSize * 0.8; strength: Look.shadowStrength * bp.k1 }
-        Rectangle { id: bg; anchors.fill: parent; radius: Look.sq ? 0 : (Math.min(height / 2, 24 + (1 - bp.k1) * 30)); color: bp.pal ? bp.pal.surface : "#141414"; border.width: 1; border.color: bp.pal ? bp.pal.line : Qt.rgba(1, 1, 1, 0.06) }
+        Shadow { anchors.fill: bg; radius: Look.sq ? 0 : (bg.radius); on: Look.shadows && Look.shadowPanels; size: Look.shadowSize * 0.8; strength: Look.shadowStrength * bp.openE }
+        Rectangle { id: bg; anchors.fill: parent; radius: Look.sq ? 0 : (Math.min(height / 2, bp.pillH / 2 + (24 - bp.pillH / 2) * bp.openE)); color: bp.pal ? bp.pal.surface : "#141414" }
+        // the glass line: only once the card is clearly away, so it is never drawn across the strand (the island
+        // and DropCard do the same; a border on the shape itself made the Music card the odd one out)
+        Rectangle {
+            anchors.fill: parent
+            radius: bg.radius
+            color: "transparent"; border.width: 1; border.color: bp.pal ? bp.pal.line : Qt.rgba(1, 1, 1, 0.06)
+            visible: opacity > 0.01
+            opacity: bp.dp > 0.9 && !strand.joined ? 1 : 0
+            Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+        }
         MouseArea { anchors.fill: parent }        // clicks inside do not fall through to the desktop
         // the content stays where it belongs while the shape opens over it
         Item {
             id: cont
             x: -shape.x; y: -shape.y
             width: bp.width; height: bp.height
-            opacity: Math.max(0, (bp.k1 - 0.45) / 0.55) * bp.cf
-            transform: Translate { y: (1 - bp.k1) * (bp.down ? -14 : 14) }
+            opacity: Math.max(0, (bp.openE - 0.45) / 0.55) * bp.cf
 
     // ---------- music ----------
     MusicPop {

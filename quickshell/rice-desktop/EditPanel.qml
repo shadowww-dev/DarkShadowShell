@@ -688,7 +688,7 @@ Item {
                                     // a new one: the pin goes first, the others at the end
                                     if (!mt.on) { if (k === "pin") l.unshift(k); else l.push(k) }
                                     if (!mt.on && k === "music" && secDock.d.media === false) ep.dk.setKey("media", true)
-                                    if (!mt.on && k === "pin" && secDock.d.pinButton === false) ep.dk.setKey("pinButton", true)
+                                    if (!mt.on && k === "pin" && secDock.d.pinButton !== true) ep.dk.setKey("pinButton", true)
                                     if (!mt.on && k === "launcher" && secDock.d.appsButton === false) ep.dk.setKey("appsButton", true)
                                     ep.dk.setKey("mods", l.join(","))
                                 } }

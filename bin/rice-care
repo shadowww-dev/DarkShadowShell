@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """rice-care: keeping the computer itself up to date and clean (Settings > System > Care), V6.00 (V6.01).
 
-  rice-care updates           JSON: the updates waiting for the system, by package manager (nothing is changed)
+  rice-care updates [--fresh] JSON: the updates waiting for the system, by package manager (nothing is changed;
+                              kept for 10 minutes, --fresh checks again). AUR is shown, never updated here
   rice-care update            the update in a terminal: a snapshot first when snapper or timeshift is there,
-                              then every package manager found (your password is asked there, never here)
+                              the mirrors (reflector), then every package manager found (your password is asked
+                              there, never here). AUR is left alone: install.sh upgrades only what the shell needs
   rice-care scan              JSON: what can be cleaned and how big it is (nothing is removed)
   rice-care clean ID...       clean those: your own files at once, the system's in a terminal (it asks for your
                               password). IDs: pkgcache orphans journal coredumps aurcache thumbnails trash
@@ -90,9 +92,26 @@ def arrow(line):
     return {"name": p[0], "from": "", "to": p[1] if len(p) > 1 else ""} if p else None
 
 
-def updates():
+UPDATES = CACHE + "/updates.json"
+UPDATES_KEEP = 600          # seconds: checkupdates and flatpak are slow, and both UIs read the same answer
+
+
+def updates(fresh=False):
+    """the answer is kept for a while: Update Center, About and Care all ask, and checkupdates can take minutes"""
+    if not fresh:
+        try:
+            d = json.load(open(UPDATES))
+            if time.time() - d.pop("at", 0) < UPDATES_KEEP:
+                print(json.dumps(d))
+                return
+        except (OSError, ValueError):
+            pass
     out = []
-    if has("pacman"):
+    if has("rpm-ostree"):
+        # Fedora Atomic (Silverblue, Bazzite): dnf sees the layered packages only; the system comes as an image
+        out.append({"id": "ostree", "name": "Fedora Atomic (rpm-ostree)", "items": [],
+                    "note": "Layered packages update with sudo rpm-ostree upgrade; a restart puts them on", "manual": True})
+    elif has("pacman"):
         if has("checkupdates"):
             code, so, _ = run(["checkupdates"], 120)        # its own copy of the database: safe while you work
             out.append({"id": "pacman", "name": "Arch packages", "items": pkg_lines(so, arrow) if code in (0, 2) else [],
@@ -104,7 +123,9 @@ def updates():
         h = aur_helper()
         if h:
             code, so, _ = run([h, "-Qua"], 120)
-            out.append({"id": "aur", "name": "AUR (" + h + ")", "items": pkg_lines(so, arrow), "note": ""})
+            # shown only: an AUR build is someone else's code, and the update here is the shell's, not the AUR's
+            out.append({"id": "aur", "name": "AUR (" + h + ")", "items": pkg_lines(so, arrow),
+                        "note": "not updated here, unless the shell needs the package", "manual": True})
     elif has("xbps-install"):
         code, so, _ = run(["xbps-install", "-nuM"], 120)
         out.append({"id": "xbps", "name": "Void packages",
@@ -129,14 +150,33 @@ def updates():
         code, so, _ = run(["zypper", "-q", "lu"], 120)
         out.append({"id": "zypper", "name": "openSUSE packages",
                     "items": pkg_lines(so, lambda l: {"name": l.split("|")[2].strip(), "from": "", "to": ""} if l.count("|") >= 4 and l[0] in "v ?" else None), "note": ""})
+    elif has("nixos-rebuild"):
+        # NixOS (the main system): the packages are in configuration.nix, so there is nothing to list or update here
+        out.append({"id": "nixos", "name": "NixOS system", "items": [],
+                    "note": "Your system updates with sudo nixos-rebuild switch --upgrade; packages stay in configuration.nix",
+                    "manual": True})
     if has("flatpak"):
         code, so, _ = run(["flatpak", "remote-ls", "--updates", "--columns=application,version"], 120)
         out.append({"id": "flatpak", "name": "Flatpak apps",
                     "items": pkg_lines(so, lambda l: {"name": l.split()[0], "from": "", "to": l.split()[1] if len(l.split()) > 1 else ""}), "note": ""})
+    if has("snap"):
+        code, so, _ = run(["snap", "refresh", "--list"], 120)
+        out.append({"id": "snap", "name": "Snap apps",
+                    "items": pkg_lines(so, lambda l: None if l.split()[0] == "Name" else
+                                       {"name": l.split()[0], "from": "", "to": l.split()[1] if len(l.split()) > 1 else ""}), "note": ""})
     for m in out:
         m["count"] = len(m["items"])
         m["items"] = m["items"][:200]
-    print(json.dumps({"managers": out, "total": sum(m["count"] for m in out), "snapshot": snapshot_tool()}))
+    d = {"managers": out, "total": sum(m["count"] for m in out),
+         "updateable": sum(m["count"] for m in out if not m.get("manual")), "snapshot": snapshot_tool()}
+    os.makedirs(CACHE, exist_ok=True)
+    try:
+        tmp = UPDATES + ".new"
+        json.dump(dict(d, at=int(time.time())), open(tmp, "w"))
+        os.replace(tmp, UPDATES)
+    except OSError:
+        pass
+    print(json.dumps(d))
 
 
 def snapshot_tool():
@@ -150,7 +190,9 @@ def snapshot_tool():
 def terminal(script, title):
     """runs a bash script in the user's terminal; it waits for Enter at the end so it can be read"""
     os.makedirs(CACHE, exist_ok=True)
-    f = CACHE + "/care-run.sh"
+    # V7.00: one file per run. A second clean-up while the first window is still open used to rewrite the script the
+    # first bash was still reading, so it could carry on in the middle of the new one and run the wrong command
+    f = CACHE + "/care-run-%d.sh" % os.getpid()
     try:
         os.remove(PIDF)
     except OSError:
@@ -158,7 +200,7 @@ def terminal(script, title):
     # the pid file is there while it works: Settings (rice-care wait) looks again once it is gone
     open(f, "w").write("#!/usr/bin/env bash\nset -u\nP=\"" + PIDF + "\"\necho $$ > \"$P\"\ntrap 'rm -f \"$P\"' EXIT\n"
                        "B=$'\\e[1m'; G=$'\\e[32m'; Z=$'\\e[0m'\necho \"${B}" + title + "${Z}\"\necho\n" + script
-                       + "\nrm -f \"$P\"\necho\necho \"${G}${B}Done.${Z} Press Enter to close.\"\nread -r _\n")
+                       + "\nrm -f \"$P\"\necho\necho \"${G}${B}Done.${Z} Press Enter to close.\"\nread -r _\nrm -f \"$0\"\n")
     os.chmod(f, 0o700)
     term = BIN + "rice-term"
     cmd = [term, "--class", "rice-care", "-e", "bash", f] if os.access(term, os.X_OK) else ["kitty", "--class", "rice-care", "bash", f]
@@ -173,8 +215,10 @@ def update():
     elif snap == "timeshift":
         s.append('echo "A snapshot first (timeshift), so this update can be undone:"; sudo timeshift --create --comments "Before an update (DarkShadow)" --scripted >/dev/null && echo "  made." || echo "  could not make one: going on."')
     if has("pacman"):
-        h = aur_helper()
-        s.append(('echo; echo "Arch and AUR packages (%s):"; %s -Syu' % (h, h)) if h else 'echo; echo "Arch packages:"; sudo pacman -Syu')
+        # the mirrors first (reflector), then the repositories. AUR: no. Its builds are the AUR's, and a broken one
+        # can take the update with it; the shell upgrades the AUR packages it needs in install.sh --update
+        s.append('echo; echo "Mirrors (reflector):"; "' + BIN + 'rice-mirrors" || echo "  kept the mirrors you have"')
+        s.append('echo; echo "Arch packages:"; sudo pacman -Syu')
     elif has("xbps-install"):
         s.append('echo; echo "Void packages:"; sudo xbps-install -Su')
     elif has("dnf"):
@@ -183,9 +227,18 @@ def update():
         s.append('echo; echo "Debian / Ubuntu packages:"; sudo apt update && sudo apt upgrade')
     elif has("zypper"):
         s.append('echo; echo "openSUSE packages:"; sudo zypper dup')
+    elif has("emerge"):
+        # Gentoo (V6.70): the sync the note asks for, then @world
+        s.append('echo; echo "Gentoo packages:"; sudo emaint sync -a && sudo emerge -uDN @world')
     if has("flatpak"):
         s.append('echo; echo "Flatpak apps:"; flatpak update -y')
+    if has("snap"):
+        s.append('echo; echo "Snap apps:"; sudo snap refresh')
     if not s:
+        if has("nixos-rebuild") or has("rpm-ostree"):
+            # NixOS and the atomic Fedoras: a full system update is their own command, never this one
+            print("Your system updates with sudo nixos-rebuild switch --upgrade (or rpm-ostree upgrade); nothing to do here")
+            return
         sys.exit("rice-care: no package manager found")
     terminal("\n".join(s), "Updating the system")
 
@@ -397,7 +450,7 @@ def wait():
 def main(a):
     cmd = a[1] if len(a) > 1 else ""
     if cmd == "updates":
-        updates()
+        updates("--fresh" in a)
     elif cmd == "update":
         update()
     elif cmd == "scan":

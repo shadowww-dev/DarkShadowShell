@@ -72,7 +72,8 @@ def daemon():
     leave = None
     pos = "top"
     mon = (0, 0, 1920, 1080)
-    t_cfg = 0
+    t_cfg = t_pid = 0
+    pid = None
     while True:
         now = time.time()
         if now - t_cfg > 3:
@@ -81,7 +82,11 @@ def daemon():
                 return
             pos = position()
             mon = monitor()
-        pid = waybar_pid()
+        # V7.00: pgrep twice every 70 ms was ~28 processes a second for the life of the session; the bar's pid
+        # changes only when it restarts, so once a second is enough
+        if now - t_pid > 1:
+            t_pid = now
+            pid = waybar_pid()
         if pid != last_pid:
             last_pid = pid
             shown = False
@@ -93,7 +98,11 @@ def daemon():
             near = y <= 1 if pos == "top" else y >= h - 2
             inside = y <= ZONE if pos == "top" else y >= h - ZONE
             if not shown and near:
-                os.kill(pid, 10)  # SIGUSR1 toggles visibility
+                try:
+                    os.kill(pid, 10)  # SIGUSR1 toggles visibility
+                except OSError:
+                    pid = last_pid = None      # it restarted between the pid check and this line
+                    continue
                 shown = True
                 leave = None
             elif shown:
@@ -102,7 +111,11 @@ def daemon():
                 elif leave is None:
                     leave = now
                 elif now - leave > 0.6:
-                    os.kill(pid, 10)
+                    try:
+                        os.kill(pid, 10)
+                    except OSError:
+                        pid = last_pid = None
+                        continue
                     shown = False
                     leave = None
         time.sleep(0.07)

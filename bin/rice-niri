@@ -343,7 +343,7 @@ def default_binds(f, term, files):
 ACTION_KEYS = {
     "terminal": "Mod+Return", "launcher": "Mod+D", "launcher2": "Alt+Space", "settings": "Mod+U", "wallpaper": "Mod+W",
     "quick": "Mod+A", "cc": "Mod+N", "gamebar": "Mod+G", "dashboard": "Mod+Alt+D", "lock": "Mod+L", "close": "Mod+Q",
-    "float": "Mod+Shift+V", "clipboard": "Mod+V", "shot": "Print", "shotfull": "Shift+Print", "record": "Mod+Shift+R", "widgets": "Mod+Alt+W",
+    "float": "Mod+Shift+V", "fullscreen": "Mod+Shift+F", "clipboard": "Mod+V", "shot": "Print", "shotfull": "Shift+Print", "record": "Mod+Shift+R", "widgets": "Mod+Alt+W",
     "taskview": "Mod+Tab", "switcher": "Alt+Tab", "keys": "Mod+Slash",
 }
 
@@ -805,6 +805,8 @@ def startup(f, s):
         # the wallpaper (not when Settings > Wallpaper says the shell sets none)
         b + "rice-walls awww",
         b + "rice-notifyd",
+        # apps that put themselves in autostart (Mullvad VPN and the like): ~/.config/autostart, as XDG says
+        b + "rice-autostart",
         "hypridle",
         b + "rice-bar start",
         b + "rice-desktop start",

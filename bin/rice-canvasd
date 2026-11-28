@@ -183,7 +183,12 @@ def proc_info(pid):
 def running_pid():
     try:
         pid = int(open(PID).read().strip() or 0)
-        return pid if pid > 0 and os.path.exists("/proc/%d" % pid) else 0
+        if pid <= 0 or not os.path.exists("/proc/%d" % pid):
+            return 0
+        # V7.01: a pid file left by a crash outlives the number: the kernel can give it to another program, and
+        # SIGTERM here would stop that one instead. The command line says whether it is still this daemon
+        cmd = open("/proc/%d/cmdline" % pid, "rb").read().replace(b"\0", b" ")
+        return pid if b"rice-canvasd" in cmd else 0
     except (OSError, ValueError):
         return 0
 
@@ -257,13 +262,42 @@ def shell_say(line):
         pass
 
 
+def hypr_req(line, timeout=0.5):
+    """V7.01: one ask over Hyprland's own socket. Dragging the canvas used to start a hyprctl process up to 60 times
+    a second (a fork storm that made the movement lag); Hyprland answers the same request in a few milliseconds."""
+    s = None
+    try:
+        sig = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE", "")
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        s.connect(os.path.join(RUN, "hypr", sig, ".socket.sock"))
+        s.sendall(line.encode())
+        out = b""
+        while True:
+            d = s.recv(65536)
+            if not d:
+                break
+            out += d
+        return out.decode(errors="replace")
+    except OSError:
+        return None
+    finally:
+        if s:
+            s.close()
+
+
 def hypr_eval(code):
-    return subprocess.Popen(["hyprctl", "eval", code], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # the old hyprctl way when the socket is not there (an old Hyprland or a session that is going away)
+    if hypr_req("eval " + code) is None:
+        try:
+            subprocess.Popen(["hyprctl", "eval", code], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError:
+            pass
 
 
 def cursor():
     try:
-        a, b = subprocess.run(["hyprctl", "cursorpos"], capture_output=True, text=True, timeout=0.5).stdout.split(",")
+        a, b = hypr_req("cursorpos").split(",")
         return float(a), float(b)
     except Exception:
         return None
@@ -316,7 +350,11 @@ def nstate():
 def nsave(st):
     try:
         os.makedirs(os.path.dirname(NSTATE), exist_ok=True)
-        json.dump(st, open(NSTATE, "w"))
+        # V7.00: the daemon writes this every 0.6 s while another copy may toggle; a crash mid-write used to leave
+        # a truncated file, which reads back as "off" with no floated windows to put back
+        tmp = NSTATE + ".new"
+        json.dump(st, open(tmp, "w"))
+        os.replace(tmp, NSTATE)
     except OSError:
         pass
 
@@ -354,10 +392,14 @@ def niri_tick():
     if not st.get("on"):
         return
     changed = False
+    floated = st.setdefault("floated", [])
     for w in nwindows():
         if w.get("workspace_id") == st.get("ws") and not w.get("is_floating"):
-            nact("MoveWindowToFloating", id=w["id"])
-            st.setdefault("floated", []).append(w["id"])
+            # V7.00: a refused action (fullscreen, a locked layout) used to add the same id again every tick, so the
+            # list grew without end and was rewritten to disk each time
+            if nact("MoveWindowToFloating", id=w["id"]) is None or w["id"] in floated:
+                continue
+            floated.append(w["id"])
             changed = True
     if changed:
         nsave(st)
@@ -524,7 +566,6 @@ def main():
     moved_rel = False
     rel_hold = False     # this hold came with mouse movement: never mix in the pointer
     hold_t = 0
-    proc = None
     last_scan = 0
     last_tick = 0
     last_send = 0
@@ -630,7 +671,7 @@ def main():
         if not mode:
             acc = [0.0, 0.0]
             continue
-        if time.time() - last_send < 0.016 or (proc and proc.poll() is None):
+        if time.time() - last_send < 0.016:
             continue
         dx, dy = acc
         # a touchpad gives no mouse movement: follow the pointer instead (only when this hold had no mouse movement
@@ -660,12 +701,11 @@ def main():
         sign = -1 if int(c["dir"]) == 2 else 1
         if NIRI:
             niri_slide(idx * sign, idy * sign)
-            proc = None
         elif mode == "canvas":
-            proc = hypr_eval("if RiceInfinite then RiceInfinite.slide(%d, %d) end" % (idx * sign, idy * sign))
+            hypr_eval("if RiceInfinite then RiceInfinite.slide(%d, %d) end" % (idx * sign, idy * sign))
             shell_say("pan %d %d" % (idx * sign, idy * sign))
         else:
-            proc = hypr_eval("if RiceInfinite then RiceInfinite.edge_push(%d, %d) end" % (idx, idy))
+            hypr_eval("if RiceInfinite then RiceInfinite.edge_push(%d, %d) end" % (idx, idy))
         last_send = time.time()
 
 

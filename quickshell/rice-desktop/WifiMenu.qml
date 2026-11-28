@@ -9,13 +9,12 @@ PanelWindow {
     screen: Mon.screen
     id: wm
     // Minimal mode: the bar's own tinted surface, so the menu matches the bar (V5.02: it was near black)
-    NPal { id: sqPal; theme: "shell"; alpha: 0.94 }
+    NPal { id: sqPal; theme: "shell"; alpha: Math.min(1, BarSvc.barAlpha + 0.04) }
     property bool open: false
     property real t: 0
-    // t runs evenly; the menu eases on its own: it grows out of the bar (quick start, soft landing) and
-    // folds back up quickly when it closes
-    Behavior on t { NumberAnimation { duration: wm.open ? 520 : 200; easing.type: Easing.Linear } }
-    readonly property real et: 1 - Math.pow(1 - t, 4)
+    // V7.14: the Dynamic island's motion, 520 ms both ways; DropCard does the growing shape and the gap
+    Behavior on t { NumberAnimation { duration: Look.lite ? 240 : 520; easing.type: Easing.InOutCubic } }
+    readonly property real et: t
     onOpenChanged: t = open ? 1 : 0
 
     // ---------- look ----------
@@ -23,8 +22,8 @@ PanelWindow {
     readonly property color dim: Qt.rgba(0.965, 0.961, 0.957, 0.6)
     readonly property color line: Qt.rgba(1, 1, 1, 0.09)
     readonly property color hot: Qt.rgba(1, 1, 1, 0.07)
-    readonly property real alpha: Look.flat ? 1 : 0.62
-    readonly property color bg: Look.sq ? sqPal.minSurface : Qt.rgba(0.05, 0.05, 0.05, alpha)
+    // the same surface as the bar and its island (it used to be a near-black 5 % panel, darker than the island)
+    readonly property color bg: sqPal.surface
     property var bc: ({})
     // V4.95: opened from the dock ("dock:SPACE" after the place): it opens above the dock, not by the bar
     property real dockSpace: -1
@@ -175,36 +174,31 @@ PanelWindow {
     // if the closing animation ever stalls (the compositor sent no frames for a moment), it still goes away
     Timer { id: closeT; property bool done: false; interval: 600; running: !open; onRunningChanged: if (running) done = false; onTriggered: done = true }
     // niri: blur behind the card (Hyprland blurs this layer with its own rule)
-    NiriBlur { win: wm; items: [card]; radius: Look.sq ? 0 : (card.radius); on: wm.open && wm.et > 0.94 }
+    NiriBlur { win: wm; items: [card.shapeItem]; radius: card.radius; on: wm.open && wm.et > 0.94 }
     color: "transparent"
     anchors { top: true; left: true; right: true; bottom: true }
     exclusionMode: ExclusionMode.Ignore
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.namespace: "rice-wifi"
-    WlrLayershell.keyboardFocus: open ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+    // V6.85: no keyboard grab; only the password field takes it (OnDemand), so an open menu
+    // does not swallow typing in the app behind it
+    WlrLayershell.keyboardFocus: wm.askFor !== "" ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
     MouseArea { anchors.fill: parent; onClicked: wm.hide() }
 
     readonly property int shown: Math.min(Math.max(nets.length, 1), maxRows)
     readonly property real listH: shown * rowH + (askFor !== "" && nets.length <= maxRows ? 52 : 0)
-    Rectangle {
+    DropCard {
         id: card
-        Frame { }      // V4.98 Minimal mode
-        width: wm.cardW
-        height: head.height + 14 + wm.listH + (wm.msg !== "" ? 34 : 0) + 14
-        Behavior on height { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
-        x: wm.side ? (wm.atRight ? wm.width - wm.sideSpace - width : wm.sideSpace)
-                     : Math.max(12, Math.min(wm.width - width - 12, wm.cx - width / 2))
-        y: wm.side ? Math.max(12, Math.min(wm.height - height - 12, (wm.cy < 0 ? wm.height / 2 : wm.cy) - 30))
-                     : (wm.atBottom ? wm.height - wm.barSpace - height : wm.barSpace)
-        radius: Look.sq ? 0 : (20)
-        color: wm.bg
-        border.width: 1; border.color: wm.line
-        opacity: Math.min(1, wm.et * 1.6)
-        scale: 0.9 + 0.1 * wm.et
-        transformOrigin: wm.side ? (wm.atRight ? Item.Right : Item.Left) : (wm.atBottom ? Item.Bottom : Item.Top)
-        // it comes out of the bar: down from a top bar, up from a bottom one, sideways from a bar on the side
-        transform: Translate { x: wm.side ? (1 - wm.et) * (wm.atRight ? 26 : -26) : 0
-                               y: wm.side ? 0 : (1 - wm.et) * (wm.atBottom ? 26 : -26) }
+        anchors.fill: parent
+        t: wm.et
+        openW: wm.cardW
+        openH: head.height + 14 + wm.listH + (wm.msg !== "" ? 34 : 0) + 14
+        fromW: 38; pillH: 26
+        ax: wm.cx; ay: wm.cy
+        side: wm.side; atRight: wm.atRight; down: !wm.atBottom
+        barSpace: wm.barSpace; sideSpace: wm.sideSpace
+        rad: Look.sq ? 0 : 20
+        bg: wm.bg; line: wm.line
         focus: true
         Keys.onEscapePressed: wm.hide()
         MouseArea { anchors.fill: parent }

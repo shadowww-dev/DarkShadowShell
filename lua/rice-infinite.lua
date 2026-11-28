@@ -39,13 +39,13 @@ RI.ws = nil
 RI.z, RI.ox, RI.oy = 1.0, 0, 0
 RI.world = {}      -- address -> { x, y, w, h } on the canvas (screen = offset + canvas * zoom)
 RI.tiled = {}      -- address -> true: it was tiled before, tile it again when turned off
-RI.cfg = { step = 0.12, min = 0.2, max = 1.0, pan = 180, screens = 1, speed = 1.0, dir = 1 }   -- V5.02: this workspace by default
+RI.cfg = { step = 0.12, min = 0.2, max = 1.0, pan = 180, screens = 0, speed = 1.0, dir = 1 }   -- V7.16: every screen by default
 
 local function run(d)
     if d then pcall(hl.dispatch, d) end
 end
 
--- every screen is one canvas (screens = 0), or only the workspace it was turned on (screens = 1, the default)
+-- every screen is one canvas (screens = 0, the default), or only the workspace it was turned on (screens = 1)
 local function shared()
     return tonumber(RI.cfg.screens) ~= 1
 end
@@ -159,6 +159,36 @@ local function place(w, s, resize)
     run(hl.dsp.window.move({ x = math.floor(RI.ox + s.x * RI.z + 0.5), y = math.floor(RI.oy + s.y * RI.z + 0.5), window = sel(w) }))
 end
 
+-- a place that would land outside its screen is brought back on it. A window given its place while the canvas was
+-- panned has canvas numbers that mean nothing once the view is back at 100 %; without this it was put outside the
+-- screen and looked gone after turning Infinite Desktop off. V7.16: a place that only stuck out a little (the usual
+-- case for a floating window such as Settings) was left half off the screen and looked gone too, so the whole
+-- rectangle is kept inside the monitor now, not just its top-left corner.
+local function visible_place(w, s)
+    local m = w.monitor
+    if type(m) ~= "table" or not m.width then m = hl.get_active_monitor() end
+    if type(m) ~= "table" or not m.width then return s end
+    local sc = tonumber(m.scale) or 1
+    if sc <= 0 then sc = 1 end
+    local W, H = (tonumber(m.width) or 1920) / sc, (tonumber(m.height) or 1080) / sc
+    local r = m.reserved or {}
+    local l, t = (tonumber(m.x) or 0) + (tonumber(r.left) or 0), (tonumber(m.y) or 0) + (tonumber(r.top) or 0)
+    local rr, bb = (tonumber(m.x) or 0) + W - (tonumber(r.right) or 0), (tonumber(m.y) or 0) + H - (tonumber(r.bottom) or 0)
+    local sw, sh = (tonumber(s.w) or 400) * RI.z, (tonumber(s.h) or 300) * RI.z
+    local x, y = RI.ox + s.x * RI.z, RI.oy + s.y * RI.z
+    local pad = 24
+    local nx, ny = x, y
+    if sw > rr - l - 2 * pad then nx = l + (rr - l - sw) / 2
+    else nx = math.max(l + pad, math.min(rr - pad - sw, x)) end
+    if sh > bb - t - 2 * pad then ny = t + (bb - t - sh) / 2
+    else ny = math.max(t + pad, math.min(bb - pad - sh, y)) end
+    if math.abs(nx - x) > 0.5 or math.abs(ny - y) > 0.5 then
+        s.x, s.y = (nx - RI.ox) / RI.z, (ny - RI.oy) / RI.z
+        s.tx, s.ty = nil, nil
+    end
+    return s
+end
+
 local function here()
     return RI.on and (shared() or active_ws() == RI.ws)
 end
@@ -187,6 +217,13 @@ function RI.zoom(dir)
     RI.zoom_to(dir > 0 and RI.z * f or RI.z / f)
 end
 
+-- while the canvas is dragged with the mouse, Hyprland's own windowMove animation would chase each 16 ms target and
+-- lag behind it (the windows moved in visible steps). It is turned off for the drag and put back afterwards
+local liveMove = false
+local function live_anim(on)
+    pcall(hl.animation, { leaf = "windowsMove", enabled = not on, speed = 3, bezier = "quick" })
+end
+
 -- live: many small moves in a row (SUPER + ALT + mouse); the place is written down once at the end (RI.save)
 function RI.pan(dx, dy, live)
     if not here() then return end
@@ -198,6 +235,7 @@ function RI.pan(dx, dy, live)
 end
 
 function RI.save()
+    if liveMove then liveMove = false; live_anim(false) end
     save()
 end
 
@@ -226,7 +264,12 @@ end
 -- SUPER + ALT + mouse (the timer below, or rice-canvasd before 0.56): the canvas, or with Infinite Desktop off the
 -- floating windows here
 function RI.slide(dx, dy)
-    if here() then RI.pan(dx, dy, true) else nudge(floats_here(), dx, dy) end
+    if here() then
+        if not liveMove then liveMove = true; live_anim(true) end
+        RI.pan(dx, dy, true)
+    else
+        nudge(floats_here(), dx, dy)
+    end
 end
 
 -- ---------- the mouse without the input group (Hyprland 0.56+) ----------
@@ -636,6 +679,7 @@ end
 
 -- after Settings changed something
 function RI.reload()
+    if liveMove then liveMove = false; live_anim(false) end
     if RI.on then for _, key in ipairs(KEYS) do pcall(hl.unbind, key) end end
     local was = shared()
     pcall(RI.load_cfg)
@@ -752,7 +796,7 @@ local function bring_back()
     end
     for _, w in ipairs(list) do
         local s = RI.world[w.address]
-        if s then place(w, s, true) end
+        if s then place(w, visible_place(w, s), true) end
     end
     return true
 end
@@ -791,13 +835,14 @@ function RI.set(on)
         -- before 0.56 SUPER + ALT + mouse reads the mouse itself and cannot yet: say what the one step is
         if not CAN_POLL then run(hl.dsp.exec_cmd(HOME .. "/.local/bin/rice-canvasd --tell")) end
     else
+        if liveMove then liveMove = false; live_anim(false) end
         if RI.ws ~= nil then
             pcall(remember)
             -- back to 100 % where everything started
             RI.z, RI.ox, RI.oy = 1.0, 0, 0
             each_window(function(w)
                 local s = RI.world[w.address]
-                if s and (shared() or (w.workspace and w.workspace.id == RI.ws)) then place(w, s, true) end
+                if s and (shared() or (w.workspace and w.workspace.id == RI.ws)) then place(w, visible_place(w, s), true) end
                 if RI.tiled[w.address] then run(hl.dsp.window.float({ action = "unset", window = sel(w) })) end
             end)
         end

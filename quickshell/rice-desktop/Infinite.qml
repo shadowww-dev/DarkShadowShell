@@ -17,10 +17,10 @@ Singleton {
     property real oy: 0
     property real zoom: 1
     // infinite.conf: the wallpaper moves with the canvas (wall=1), the bar and the dock hide while it moves (hidebar=1),
-    // every screen is one canvas (screens=0) or only the workspace it was turned on (screens=1)
+    // every screen is one canvas (screens=0, the default) or only the workspace it was turned on (screens=1)
     property bool wallOn: true
     property bool hideBarOn: true
-    property int screens: 1
+    property int screens: 0
     // how much bigger than the screen the moving wallpaper is (wallzoom=1.05 ... 1.5): room to move, but also zoom
     property real wallZoom: 1.15
     // live
@@ -90,11 +90,11 @@ Singleton {
             const g = (k, d) => { const m = t.match(new RegExp("^\\s*" + k + "\\s*=\\s*(\\S+)", "m")); return m ? m[1] : d }
             cv.wallOn = g("wall", "1") !== "0"
             cv.hideBarOn = g("hidebar", "1") !== "0"
-            cv.screens = g("screens", "1") === "0" ? 0 : 1
+            cv.screens = g("screens", "0") === "1" ? 1 : 0
             const wz = parseFloat(g("wallzoom", "1.15"))
             cv.wallZoom = isNaN(wz) ? 1.15 : Math.max(1.05, Math.min(1.5, wz))
         }
-        onLoadFailed: { cv.wallOn = true; cv.hideBarOn = true; cv.wallZoom = 1.15; cv.screens = 1 }
+        onLoadFailed: { cv.wallOn = true; cv.hideBarOn = true; cv.wallZoom = 1.15; cv.screens = 0 }
     }
 
     // the pointer, while it moves (0.56+; rice-infinite.lua writes it every step): the wallpaper, the bar and the

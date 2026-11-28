@@ -29,6 +29,7 @@ it also ran the hot corner panel, which was removed in V4.52; the name stays so 
                                V6.60: the card after a recording, its frames, a trimmed copy, a GIF (of a part)
   rice-hotcorner show PATH | folder recordings|screenshots
 """
+import contextlib
 import fcntl
 import glob
 import json
@@ -340,7 +341,23 @@ def apply_blur(c=None):
         q([os.path.expanduser("~/.local/bin/rice-wm"), "reload"])
 
 
+@contextlib.contextmanager
+def actions_lock():
+    """V7.01: Keep Awake and the recorder are a check, then a start, then a pid file. Two fast presses both saw
+    "not running" and started two processes; the second pid overwrote the first, so one inhibitor or recorder was
+    never tracked (Keep Awake stayed on after "off"). The lock serialises the whole check-and-start."""
+    os.makedirs(CACHE, exist_ok=True)
+    with open(CACHE + "/actions.lock", "w") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        yield
+
+
 def toggle_awake():
+    with actions_lock():
+        toggle_awake_locked()
+
+
+def toggle_awake_locked():
     pid = alive(AWAKE_PID, "rice-sys")
     if pid:
         os.kill(pid, signal.SIGTERM)
@@ -474,6 +491,11 @@ def rec_info():
 
 
 def record(mode, geo=None):
+    with actions_lock():
+        record_locked(mode, geo)
+
+
+def record_locked(mode, geo=None):
     c = load()
     pid = alive(REC_PID, "recorder")
     if mode == "stop" or pid:

@@ -2,22 +2,20 @@ import Quickshell
 import Quickshell.Io
 import QtQuick
 
-// Settings > System > Care (V6.00): what the shell uses right now and how to make it lighter (rice-perf), updates
-// for the whole system and cleaning up (rice-care), and the whole setup in one file (rice-backup).
+// Settings > System > Care (V6.00): what the shell uses right now and how to make it lighter (rice-perf), cleaning
+// up (rice-care), and the whole setup in one file (rice-backup). Updates live in one place: Update Center.
 // Anything that needs your password opens in a terminal: nothing runs as root from here.
 Item {
     id: page
     property var ctl
     property var perf: ({ rows: [], total: 0, fixes: [] })
-    property var upd: null              // null: not checked yet
-    property bool checking: false
     property var scan: null
     property bool scanning: false
     property var picked: ({})            // clean-up ids that are ticked
     property var backups: ({ folder: "", backups: [] })
     property string confirm: ""          // the backup asked to restore, waiting for "sure?"
     property bool busy: false
-    property string waiting: ""          // V6.01: "clean" or "update" while its terminal works (then it looks again)
+    property string waiting: ""          // V6.01: "clean" while its terminal works (then it looks again)
 
     function mb(b) { return b >= 1073741824 ? (b / 1073741824).toFixed(1) + " GB" : Math.max(0, Math.round(b / 1048576)) + " MB" }
     function status(s) { if (page.ctl) page.ctl.status = s }
@@ -31,11 +29,6 @@ Item {
     Timer { interval: 5000; repeat: true; triggeredOnStart: true; running: page.visible; onTriggered: if (!perfP.running) perfP.running = true }
 
     // ---------- the commands ----------
-    Process {
-        id: updP
-        command: ["bash", "-c", "\"$HOME/.local/bin/rice-care\" updates 2>/dev/null"]
-        stdout: StdioCollector { onStreamFinished: { try { page.upd = JSON.parse(text) } catch (e) { page.upd = { managers: [], total: 0, snapshot: "" } } page.checking = false } }
-    }
     Process {
         id: scanP
         command: ["bash", "-c", "\"$HOME/.local/bin/rice-care\" scan 2>/dev/null"]
@@ -93,7 +86,6 @@ Item {
             const w = page.waiting
             page.waiting = ""
             if (w === "clean") { page.scanning = true; scanP.running = true; page.status(I18n.t("Cleaned up")) }
-            else if (w === "update") { page.checking = true; updP.running = true }
             if (!perfP.running) perfP.running = true
         }
     }
@@ -174,51 +166,6 @@ Item {
                     anchors.right: parent.right; anchors.rightMargin: 14; anchors.verticalCenter: parent.verticalCenter
                     text: I18n.t(fx.modelData.label); enabled: !page.busy
                     onClicked: page.act(fx.modelData.cmd, I18n.t("Done: %1", I18n.t(fx.modelData.label)))
-                }
-            }
-        }
-
-        // ==================== system updates ====================
-        SectionTitle { text: I18n.t("System updates"); sym: "system_update"
-            sub: page.upd && page.upd.snapshot !== "" ? I18n.t("A snapshot (%1) is made first, so an update can be undone", page.upd.snapshot)
-                                                      : I18n.t("Your packages and apps (this does not touch the shell: that is Update Center)") }
-        Row {
-            spacing: 10
-            Btn { sym: "refresh"; icon: ""; enabled: !page.checking; text: page.checking ? I18n.t("Checking...") : I18n.t("Check for updates")
-                onClicked: { page.checking = true; updP.running = true } }
-            Btn { primary: true; sym: "download"; icon: ""; visible: !!page.upd && page.upd.total > 0
-                enabled: !page.busy && page.waiting === ""
-                text: page.waiting === "update" ? I18n.t("Updating in the terminal...") : I18n.t("Update now (%1)", page.upd ? page.upd.total : 0)
-                onClicked: page.act(["bash", "-c", "\"$HOME/.local/bin/rice-care\" update"], "update") }
-        }
-        T { visible: !!page.upd && page.upd.total === 0 && !page.checking; text: I18n.t("Everything is up to date."); color: M3.inkDim; font.pixelSize: 13 }
-        Repeater {
-            model: page.upd ? page.upd.managers.filter(function(m) { return m.count > 0 || m.note !== "" }) : []
-            delegate: Rectangle {
-                id: um
-                required property var modelData
-                width: parent.width
-                height: umCol.height + 24
-                radius: M3.sq ? 0 : M3.rM
-                color: M3.surfaceC
-                Column {
-                    id: umCol
-                    x: 18; y: 12; width: parent.width - 36; spacing: 6
-                    T { text: I18n.t(um.modelData.name) + "  ·  " + um.modelData.count; font.pixelSize: 14; font.weight: Font.DemiBold }
-                    T { visible: um.modelData.note !== ""; text: I18n.t(um.modelData.note); font.pixelSize: 12; color: M3.inkDim }
-                    Flow {
-                        width: parent.width; spacing: 6
-                        Repeater {
-                            model: um.modelData.items.slice(0, 14)
-                            delegate: Rectangle {
-                                required property var modelData
-                                height: 24; width: pk.implicitWidth + 16; radius: 12; color: M3.surfaceHigh
-                                T { id: pk; anchors.centerIn: parent; font.pixelSize: 11; color: M3.inkDim
-                                    text: modelData.name + (modelData.to !== "" ? "  " + modelData.to : "") }
-                            }
-                        }
-                        T { visible: um.modelData.count > 14; text: I18n.t("and %1 more", um.modelData.count - 14); font.pixelSize: 11; color: M3.inkDim }
-                    }
                 }
             }
         }

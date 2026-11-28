@@ -105,10 +105,17 @@ def data_hypr():
         ws = (c.get("workspace") or {}).get("id", 0)
         if ws <= 0 or not c.get("mapped", True) or c.get("hidden"):
             continue
+        sz = c.get("size", [100, 100])
+        # a tray app left with a 1x1 helper window (Mullvad VPN and the like): it made a blank card, and picking it
+        # focused nothing. Real windows are never that small
+        if sz[0] < 48 or sz[1] < 48:
+            continue
+        if not (c.get("class") or c.get("initialClass") or c.get("title")):
+            continue
         if c.get("monitor") not in (None, mon.get("id")):
             # windows of another monitor: shown in their workspace, placed as if on this screen
             pass
-        at, sz = c.get("at", [0, 0]), c.get("size", [100, 100])
+        at = c.get("at", [0, 0])
         wins.append({"id": c.get("address", ""), "ws": ws, "x": (at[0] - mx) / lw, "y": (at[1] - my) / lh,
                      "w": sz[0] / lw, "h": sz[1] / lh, "cls": c.get("class", "") or c.get("initialClass", ""),
                      "title": c.get("title", ""), "order": c.get("focusHistoryID", 99),

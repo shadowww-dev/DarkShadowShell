@@ -25,6 +25,10 @@ RK.actions = {
     lock      = { "SUPER + L",         exec(BIN .. "rice-lock now") },
     close     = { "SUPER + Q",         function() return hl.dsp.window.close() end },
     float     = { "SUPER + SHIFT + V", function() return hl.dsp.window.float({ action = "toggle" }) end },
+    -- V6.94: a game that shrinks itself and then refuses its own fullscreen can still be made fullscreen from here
+    -- V6.96: the Lua call, not the old hyprctl dispatcher: a Lua-config Hyprland refuses the old names, and its
+    -- mode 1 meant maximize (the window only filled its tile), not fullscreen
+    fullscreen= { "SUPER + SHIFT + F", function() return hl.dsp.window.fullscreen() end, true },
     clipboard = { "SUPER + V",         exec(BIN .. "rice-clip toggle") },
     shot      = { "Print",             exec(BIN .. "rice-hotcorner shot region") },
     shotfull  = { "SHIFT + Print",     exec(BIN .. "rice-hotcorner shot full") },

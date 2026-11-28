@@ -45,7 +45,7 @@ Item {
             ["Super + V", "Clipboard: everything you copied", "clipboard"] ] },
         { name: "Windows", sym: "select_window", keys: [
             ["Super + Q", "Close the window", "close"], ["Super + Shift + V", "Float / tile the window", "float"],
-            ["Super + F", "Make the column as wide as the screen"], ["Super + Shift + F", "Fullscreen"],
+            ["Super + F", "Make the column as wide as the screen"], ["Super + Shift + F", "Fullscreen", "fullscreen"],
             ["Super + T", "Windows of a column as tabs"], ["Super + R", "Next column width"],
             ["Super + Minus / Equal", "Column narrower / wider"], ["Super + [  /  ]", "Put the window in the column next to it / take it out"],
             ["Super + Arrows", "Focus the window next to it"], ["Super + Ctrl + Arrows", "Move the window"],
@@ -75,6 +75,7 @@ Item {
             ["Super + V", "Clipboard: everything you copied", "clipboard"] ] },
         { name: "Windows", sym: "select_window", keys: [
             ["Super + Q", "Close the window", "close"], ["Super + Shift + V", "Float / tile the window", "float"],
+            ["Super + Shift + F", "Fullscreen the window", "fullscreen"],
             ["Super + J", "Split the other way"], ["Super + P", "Pseudo-tile (keep its own size)"],
             ["Super + F", "Infinite Desktop: windows on an endless canvas (Ctrl + wheel zooms)", "infinite"],
             ["Super + Arrows", "Focus the window next to it"],

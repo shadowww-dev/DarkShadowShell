@@ -115,12 +115,12 @@ Scope {
     readonly property var layout: {
         let l
         if (mods.indexOf("apps") < 0) {
-            l = (dc.pinButton !== false ? ["pin"] : []).concat(["apps"]).concat(mods).concat(dc.appsButton !== false ? ["launcher"] : [])
+            l = (dc.pinButton === true ? ["pin"] : []).concat(["apps"]).concat(mods).concat(dc.appsButton !== false ? ["launcher"] : [])
         } else l = mods.slice()
-        return l.filter(function(m) { return (m !== "pin" || dc.pinButton !== false) && (m !== "launcher" || dc.appsButton !== false) })
+        return l.filter(function(m) { return (m !== "pin" || dc.pinButton === true) && (m !== "launcher" || dc.appsButton !== false) })
     }
     // the full order as Edit mode shows it (the pin and the all-apps button too, even when Settings hides them)
-    readonly property var order: mods.indexOf("apps") >= 0 ? mods : (dc.pinButton !== false ? ["pin"] : []).concat(["apps"]).concat(mods).concat(dc.appsButton !== false ? ["launcher"] : [])
+    readonly property var order: mods.indexOf("apps") >= 0 ? mods : (dc.pinButton === true ? ["pin"] : []).concat(["apps"]).concat(mods).concat(dc.appsButton !== false ? ["launcher"] : [])
     property Item appsBlock: null
     Binding { target: BarSvc; property: "dockShown"; value: dock.on && dock.otherMods.some(function(m) { return m === "network" || m === "bluetooth" || m === "notifications" }) }
 

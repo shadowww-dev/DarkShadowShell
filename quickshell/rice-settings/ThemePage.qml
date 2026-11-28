@@ -114,6 +114,17 @@ Item {
             }
         }
 
+        // V6.84: what "Auto" follows, right next to the schemes it belongs to
+        SegRow {
+            visible: page.ctl.colorMode === "auto"
+            label: I18n.t("What Auto follows")
+            desc: I18n.t("Your wallpaper (as it always did), or the cover of the song that plays")
+            options: [ { label: I18n.t("Wallpaper"), value: "wall" }, { label: I18n.t("Now playing"), value: "cover" } ]
+            dflt: "wall"
+            current: page.ctl.coverColors ? "cover" : "wall"
+            onChosen: function(x) { page.ctl.setAutoSource(x === "cover") }
+        }
+
         SectionTitle { text: I18n.t("Monochrome"); sub: I18n.t("Black, white and quiet greys.") }
         Flow {
             width: parent.width

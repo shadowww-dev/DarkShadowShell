@@ -15,7 +15,7 @@
 # change the wallpaper and colors there without a password; SDDM only reads it.
 set -u
 NAME=darkshadow-shell
-THEME="/usr/share/sddm/themes/$NAME"
+THEME="${RICE_SDDM_THEME:-/usr/share/sddm/themes/$NAME}"   # RICE_SDDM_THEME: the tests' copy
 CONFD=/etc/sddm.conf.d
 CONF="$CONFD/99-darkshadow-shell.conf"
 OLDCONF="$CONFD/10-darkshadow-shell.conf"   # where V4.37 put it
@@ -40,11 +40,32 @@ theme_now() {
   done
   echo "$v"
 }
+agent_runs() { pgrep -u "$(id -u)" -f 'polkit.*agent|hyprpolkitagent|polkit-gnome-authentication' >/dev/null 2>&1; }
 sudo_run() {
-  # from Settings (no terminal): pkexec shows a password window; in a terminal: sudo
-  if [ -t 0 ] && command -v sudo >/dev/null 2>&1; then sudo "$@"
-  elif command -v pkexec >/dev/null 2>&1; then pkexec "$@"
-  else sudo "$@"; fi
+  # in a terminal: sudo asks there. From Settings: pkexec's window, but only when its agent runs: without one
+  # pkexec only says "authentication is needed to run ... as the super user" and nothing happens
+  if [ -t 0 ] && command -v sudo >/dev/null 2>&1; then sudo "$@"; return; fi
+  if command -v pkexec >/dev/null 2>&1; then
+    # the session may have started before the shell started the agent at login (V6.86): start it now, then ask.
+    # Without this, an update could not put the theme in until the next log out and back in.
+    # V6.90: the agent needs a moment to register; asking straight away found no owner and dropped to a terminal
+    if ! agent_runs && [ -x "$HOME/.local/bin/rice-services" ]; then
+      "$HOME/.local/bin/rice-services" polkit >/dev/null 2>&1
+      local i=0
+      while ! agent_runs && [ "$i" -lt 30 ]; do sleep 0.1; i=$((i + 1)); done
+    fi
+    if agent_runs; then pkexec "$@"; return; fi
+  fi
+  [ -n "${RICE_SDDM_TERM:-}" ] && { echo "no password window: a polkit agent is not running"; return 1; }
+  # no window to type in: the step goes to a terminal, where sudo can ask
+  local t="${TERMINAL:-}"
+  if [ -z "$t" ] || ! command -v "$t" >/dev/null 2>&1; then
+    for t in rice-term kitty foot alacritty wezterm konsole gnome-terminal; do command -v "$t" >/dev/null 2>&1 && break; done
+  fi
+  [ -x "$HOME/.local/bin/rice-term" ] && t="$HOME/.local/bin/rice-term"
+  command -v "$t" >/dev/null 2>&1 || { echo "no password window (polkit agent) and no terminal for sudo"; return 1; }
+  echo "A terminal opens for your password: no polkit agent is running" >&2
+  RICE_SDDM_TERM=1 "$t" -e bash -c '"$@"' _ "$@"
 }
 pkg_cmd() {
   . /etc/os-release 2>/dev/null
@@ -67,9 +88,13 @@ state() {
   cur="$(theme_now)"; [ "$cur" = "$NAME" ] && in_use=true
   [ -w "$U" ] && w=true
   # the update brought a newer theme than the one in /usr/share (putting it in again needs the password)
-  local r out=false; r="$(repo)"
+  local r out=false f; r="$(repo)"
   if [ "$inst" = true ] && [ -n "$r" ] && [ "$U" != "$NIXU" ]; then
-    for f in "$r/sddm/$NAME"/*.qml; do cmp -s "$f" "$THEME/${f##*/}" || out=true; done
+    # every file root-install puts in, not only the .qml ones: a new clock in theme.conf is a new theme too
+    for f in "$r/sddm/$NAME"/*.qml "$r/sddm/$NAME"/*.desktop "$r/sddm/$NAME"/theme.conf "$r/sddm/$NAME"/*.png; do
+      [ -f "$f" ] || continue
+      cmp -s "$f" "$THEME/${f##*/}" || out=true
+    done
   fi
   printf '{"sddm": %s, "installed": %s, "outdated": '"$out"', "in_use": %s, "theme": "%s", "dm": "%s", "writable": %s, "nixos": %s, "repo": %s, "pkg": "%s"}\n' \
     "$(have_sddm && echo true || echo false)" "$inst" "$in_use" "$cur" "$(dm_now)" "$w" \
@@ -198,9 +223,10 @@ sync() {
   fi
   if [ -n "$w" ]; then
     if [ -n "$im" ]; then
-      # a sharp one at screen size, and a blurred one (made small first: fast)
+      # V6.95: a sharp one at screen size only. The blurred copy (0x10 on a 640 px image, ~30 px once scaled) hid
+      # the wallpaper behind the login card; the card is gone too, so the screen keeps the wallpaper and a veil
       $im "$w[0]" -resize '2560x1440^' -quality 90 "$U/bg.jpg.tmp.jpg" 2>/dev/null && mv -f "$U/bg.jpg.tmp.jpg" "$U/bg.jpg"
-      $im "$w[0]" -resize '640x360^' -blur 0x10 -resize '1920x1080^' -quality 85 "$U/blur.jpg.tmp.jpg" 2>/dev/null && mv -f "$U/blur.jpg.tmp.jpg" "$U/blur.jpg"
+      rm -f "$U/blur.jpg"
     else
       cp -f "$w" "$U/bg.jpg"; rm -f "$U/blur.jpg"
     fi
@@ -212,7 +238,7 @@ sync() {
   {
     echo "[General]"
     [ -f "$U/bg.jpg" ] && echo "background=$U/bg.jpg"
-    [ -f "$U/blur.jpg" ] && echo "backgroundBlur=$U/blur.jpg"
+
     [ -n "$lv" ] && [ -f "$lv" ] && echo "backgroundVideo=$lv"
     [ -f "$U/font.ttf" ] && echo "font=$U/font.ttf"
     echo "avatarDir=$U/faces"

@@ -1,5 +1,6 @@
 pragma Singleton
 import Quickshell
+import Quickshell.Io
 import QtQuick
 
 // V6.10 Vibe (Settings > Appearance > Vibe; ~/.config/rice/vibe.json, rice-vibe): the desktop goes with your music.
@@ -19,6 +20,15 @@ import QtQuick
 Singleton {
     id: vb
     property bool cover: true
+    // V6.84: the cover's colors belong to "Auto" (Settings > Appearance > Color theme). A scheme you picked
+    // (grey, ocean, ...) is yours: a song does not repaint the shell on top of it
+    property string colorMode: "auto"
+    FileView {
+        path: Quickshell.env("HOME") + "/.config/rice/color-mode"
+        watchChanges: true; printErrors: false
+        onFileChanged: reload()
+        onLoaded: { const t = text().trim(); vb.colorMode = t !== "" ? t.split("\n")[0] : "auto" }
+    }
     property bool borders: true
     property string barStyle: "liquid"
     property string barSize: "medium"
@@ -72,7 +82,7 @@ Singleton {
     // starting) so the desktop does not flash back and forth
     property bool holdOn: false
     readonly property bool wantTint: cover && tintOk && tintOf === Player.art && Player.art !== ""
-    readonly property bool active: wantTint && (Player.playing || holdOn)
+    readonly property bool active: wantTint && colorMode === "auto" && (Player.playing || holdOn)
     property Timer grace: Timer { interval: 6000; onTriggered: vb.holdOn = false }
     property Connections pc: Connections {
         target: Player

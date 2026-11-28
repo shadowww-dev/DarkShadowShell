@@ -1,6 +1,7 @@
 import Quickshell
 import Quickshell.Io
 import QtQuick
+import QtQuick.Effects
 
 // The music card the bar's Music module opens (inside BarPop.qml): the cover in a turning halo of your shape,
 // the song, its lyrics running with it (rice-lyrics, LRCLIB; fetched only while the card is open; V6.11: one big
@@ -21,11 +22,10 @@ Item {
 
     Instantiator { model: mp.on ? 1 : 0; delegate: QtObject { Component.onCompleted: Player.hold(); Component.onDestruction: Player.release() } }
 
-    // one after another: each part gets its own moment while the card opens
-    property real e: 0
-    onOnChanged: { eA.stop(); if (on) { e = 0; eA.start() } }
-    NumberAnimation { id: eA; target: mp; property: "e"; from: 0; to: 1; duration: 760; easing.type: Easing.Linear }
-    function st(i) { const p = Math.max(0, Math.min(1, (e - i * 0.09) / 0.55)); return 1 - Math.pow(1 - p, 3) }
+    // V7.16: the content follows the card's own shape (BarPop.openE), exactly like Weather/System/Date. It used to
+    // run its own 760 ms stagger, so Music was the only card still moving after the shape had finished opening.
+    readonly property real e: mp.bp ? mp.bp.openE : 0
+    function st(i) { return mp.e }
 
     // ---------- the lyrics ----------
     // V6.11: from Lyrics (one lookup per song for the whole shell), while the card is open
@@ -43,13 +43,10 @@ Item {
         opacity: mp.st(0)
         scale: 0.55 + 0.45 * mp.st(0)
         rotation: -24 * (1 - mp.st(0))
-        // a halo of your shape behind it, turning while the song plays
-        Blob {
-            anchors.centerIn: parent; width: parent.width + 16; height: width
-            kind: Look.shape; color: Qt.rgba(mp.acc.r, mp.acc.g, mp.acc.b, 0.22)
-            SlowSpin { turn: 360; period: 22000; running: mp.on && Player.playing && !Look.lite }
-        }
-        ShapeImage { anchors.fill: parent; anchors.margins: 6; kind: "square"; source: Player.art; empty: mp.chip; fallbackColor: mp.dim }
+        // V6.88: the one cover that is a rounded square cropped to fill (the shape ate the edges of the picture).
+        // V7.15: the same cover as the desktop "Music card" widget (ShapeImage kind "square"), not a Rectangle:
+        // one Look, and the fallback note comes with it
+        ShapeImage { anchors.fill: parent; kind: "square"; source: Player.art; empty: mp.chip; fallbackColor: mp.dim }
     }
     Column {
         x: cov.x + cov.width + 16; y: 10
@@ -75,26 +72,35 @@ Item {
                 Text { id: idt; anchors.verticalCenter: parent.verticalCenter; text: Player.p ? (Player.p.identity || "Music") : ""; color: mp.acc
                     font.family: Fonts.main; font.pixelSize: 11; font.weight: Font.DemiBold } }
         }
+        // V6.85: the island's player typography (17 demi-bold, 13 for the artist), not the tight bold 19
         Text { width: parent.width; text: Player.title; color: mp.fg; wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight
-            font.family: Fonts.main; font.pixelSize: 19; font.weight: Font.Bold; lineHeight: 0.95 }
+            font.family: Fonts.main; font.pixelSize: 17; font.weight: Font.DemiBold }
         Text { width: parent.width; text: Player.artist + (Player.album !== "" ? "  ·  " + Player.album : ""); color: mp.dim; elide: Text.ElideRight
-            font.family: Fonts.main; font.pixelSize: 12 }
+            font.family: Fonts.main; font.pixelSize: 13 }
     }
 
     // ---------- the lyrics ----------
     Rectangle {
         id: words
         x: 0; y: cov.y + cov.height + 12; width: mp.width; height: 112
-        radius: Look.sq ? 0 : (22); color: mp.chip; clip: true
+        // V6.88: the block was a solid panel next to the glass card; it shows the card through it now
+        radius: Look.sq ? 0 : (22); color: Qt.rgba(mp.chip.r, mp.chip.g, mp.chip.b, 0.42); clip: true
         opacity: mp.st(2)
         transform: Translate { y: (1 - mp.st(2)) * 22 }
         // V6.11: only the line being sung, big; its words rise in and fill as they are sung
-        LyricLine {
-            anchors.fill: parent; anchors.leftMargin: 14; anchors.rightMargin: 14; anchors.topMargin: 8; anchors.bottomMargin: 8
-            visible: mp.hasSong && mp.lines.length > 0
-            size: 24; minSize: 15; maxRows: 2
-            sung: mp.acc; dim: Qt.rgba(mp.fg.r, mp.fg.g, mp.fg.b, 0.34)
-            live: mp.on && !Look.lite
+        Item {
+            anchors.fill: parent; anchors.margins: 8
+            // V6.88: a soft glow in the song's color, so the words sit on the card instead of in a box
+            layer.enabled: mp.on && mp.lines.length > 0
+            layer.effect: MultiEffect { shadowEnabled: true; shadowBlur: 0.85; shadowColor: Qt.rgba(mp.acc.r, mp.acc.g, mp.acc.b, 0.5)
+                shadowVerticalOffset: 0; shadowHorizontalOffset: 0 }
+            LyricLine {
+                anchors.fill: parent; anchors.leftMargin: 6; anchors.rightMargin: 6
+                visible: mp.hasSong && mp.lines.length > 0
+                size: 24; minSize: 15; maxRows: 2
+                sung: mp.acc; dim: Qt.rgba(mp.fg.r, mp.fg.g, mp.fg.b, 0.34)
+                live: mp.on && !Look.lite
+            }
         }
         Flickable {
             anchors.fill: parent; anchors.margins: 12
@@ -160,14 +166,22 @@ Item {
         Btn { w: 56; icon: "skip_next"; g: 0xF04AD; onHit: Player.next() }
         Btn { w: 46; icon: "volume_up"; g: 0xF057E; onHit: btns.setVol(0.05) }
     }
-    // the volume, as a thin line under the buttons
-    Rectangle {
+    // the volume, as a thin line under the buttons. V6.85: it sets the volume too (drag it or tap a point on it);
+    // before, only the + / - buttons could change it
+    Item {
         anchors.horizontalCenter: parent.horizontalCenter
-        y: btns.y + 56; width: 150; height: 4; radius: Look.sq ? 0 : (2)
-        color: Qt.rgba(mp.acc.r, mp.acc.g, mp.acc.b, 0.18)
+        y: btns.y + 48; width: 150; height: 20
         opacity: mp.st(5)
-        Rectangle { width: Math.max(4, parent.width * Math.min(1, btns.vol)); height: 4; radius: Look.sq ? 0 : (2); color: mp.acc
-            Behavior on width { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } } }
+        Rectangle { anchors.verticalCenter: parent.verticalCenter; width: parent.width; height: 4; radius: Look.sq ? 0 : (2)
+            color: Qt.rgba(mp.acc.r, mp.acc.g, mp.acc.b, 0.18) }
+        Rectangle { anchors.verticalCenter: parent.verticalCenter; width: Math.max(4, parent.width * Math.min(1, btns.vol)); height: 4; radius: Look.sq ? 0 : (2); color: mp.acc
+            Behavior on width { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } } }
+        MouseArea {
+            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+            function put(m) { Vol.set(mp.sink, Math.max(0, Math.min(1, m.x / width))) }
+            onPressed: function(m) { put(m) }
+            onPositionChanged: function(m) { if (pressed) put(m) }
+        }
     }
 
     component Btn: Item {

@@ -95,7 +95,7 @@ trap cleanup EXIT
 if [ "$DRY_RUN" != 1 ] && [ "${RICE_UPDATE_LOCK:-0}" != 1 ]; then
   mkdir -p "$HOME/.cache/rice"
   exec 9>"$HOME/.cache/rice/update.lock"
-  flock -n 9 || { fail "Another update is already running. Wait for it to finish."; exit 1; }
+  flock -n 9 || { fail "Another update is already running: one that Settings started may be waiting in a terminal for your answer. Finish it there, or close that terminal, then run this again."; exit 1; }
 fi
 
 # ------------------------------------------------------------------ helpers
@@ -112,128 +112,22 @@ def k(v):
 sys.exit(0 if k(sys.argv[1]) > k(sys.argv[2]) else 1)
 PY
 }
-# ---- your own edits survive updates (V4.32) ----
-# The installer remembers what it wrote (~/.config/rice/installed.sums). A Quickshell file (.qml, .js) you changed
-# since then is kept as it is on an update: the new version lands next to it as FILE.rice-update and the summary
-# lists it. Before there was a list, the version the repo had before this update (git) tells if it was changed.
-SUMS="$HOME/.config/rice/installed.sums"
-# one line per file: appending on every update made this grow without end (and every check below slower)
-[ -f "$SUMS" ] && awk 'NF >= 2 { h = $1; sub(/^[^ ]+  */, ""); s[$0] = h } END { for (k in s) print s[k] "  " k }' "$SUMS" >"$SUMS.tmp" && mv "$SUMS.tmp" "$SUMS"
-KEPTF="$HOME/.cache/rice/kept-edits"
-PREV_REV=""
-sum_of() { sha256sum 2>/dev/null | cut -c1-64; }
-rec_sum() { # rec_sum DST: what is in DST now is ours
-  [ "$DRY_RUN" = 1 ] && return 0
-  case "$1" in "$HOME"/.config/quickshell/*.qml|"$HOME"/.config/quickshell/*.js) ;; *) return 0 ;; esac
-  mkdir -p "$(dirname "$SUMS")"
-  printf '%s  %s\n' "$(sum_of <"$1")" "${1#"$HOME"/}" >>"$SUMS"
-}
-user_edited() { # user_edited SRC DST: true when you changed DST after the installer wrote it
-  local src="$1" dst="$2" rel cur rec old
-  [ "${RICE_OVERWRITE:-0}" = 1 ] && return 1
-  case "$dst" in "$HOME"/.config/quickshell/*.qml|"$HOME"/.config/quickshell/*.js) ;; *) return 1 ;; esac
-  rel="${dst#"$HOME"/}"
-  cur="$(sum_of <"$dst")"
-  rec="$(grep -F "  $rel" "$SUMS" 2>/dev/null | awk -v r="$rel" '$2 == r { s = $1 } END { print s }')"
-  if [ -n "$rec" ]; then [ "$cur" != "$rec" ]; return; fi
-  [ -n "$PREV_REV" ] || return 1
-  git -C "$ROOT" cat-file -e "$PREV_REV:${src#"$ROOT"/}" 2>/dev/null || return 1      # not in that version
-  old="$(git -C "$ROOT" show "$PREV_REV:${src#"$ROOT"/}" 2>/dev/null | sed -e "s|@HOME@|$HOME|g" -e "s|@USER@|$USER|g" | sum_of)"
-  [ -n "$old" ] && [ "$cur" != "$old" ]
-}
-keep_edit() { # keep_edit SRC DST: your file stays, the new one goes next to it
-  put "$1" "$2.rice-update"
-  mkdir -p "$(dirname "$KEPTF")"; printf '%s\n' "${2#"$HOME"/}" >>"$KEPTF"
-}
+# your own edits survive updates (put, bk_one, copy_tree, user_edited): kept in one file so its test
+# can source it without running the installer (tests/security.sh)
+# shellcheck source=install/lib/edits.sh
+. "$ROOT/install/lib/edits.sh"
 
-# put SRC DST: copy one file, fill in @HOME@/@USER@, back up what it replaces
-put() {
-  local src="$1" dst="$2" rel
-  [ "$DRY_RUN" = 1 ] && return 0
-  if [ -e "$dst" ] || [ -L "$dst" ]; then
-    rel="${dst#"$HOME"/}"
-    mkdir -p "$BK/$(dirname "$rel")"
-    cp -aL "$dst" "$BK/$rel" 2>/dev/null || warn "could not back up ~/$rel (it is replaced anyway)"
-    [ -L "$dst" ] && rm -f "$dst"
-  fi
-  mkdir -p "$(dirname "$dst")"
-  if grep -qI . "$src" 2>/dev/null; then
-    sed -e "s|@HOME@|$HOME|g" -e "s|@USER@|$USER|g" "$src" >"$dst"
-  else
-    cp -f "$src" "$dst"
-  fi
-  [ -x "$src" ] && chmod +x "$dst"
-  return 0
-}
-# V6.80: a file the installer changes in place (not replaced with a new one: the GTK settings, btop's config, lines
-# added to hyprland.lua, the fixes of fixup.py) gets a copy in this run's backup first, like every replaced file.
-# Before, only replaced files were saved, so "every file it changes is backed up" was not true for these
-bk_one() { # bk_one FILE
-  local f="$1" rel
-  [ "$DRY_RUN" = 1 ] && return 0
-  [ -f "$f" ] || return 0
-  case "$f" in "$HOME"/*) ;; *) return 0 ;; esac
-  rel="${f#"$HOME"/}"
-  [ -e "$BK/$rel" ] && return 0
-  mkdir -p "$BK/$(dirname "$rel")"
-  cp -aL "$f" "$BK/$rel" 2>/dev/null || warn "could not back up ~/$rel"
-}
-copy_tree() { # copy_tree SRC_DIR DST_DIR
-  local src="$1" dst="$2" f rel
-  local -a new_files=() kept_files=()
-  [ -d "$src" ] || return 0
-  # files that are new on this computer go first (a changed file may need them, and Quickshell reloads as soon as
-  # something changes), then the changed ones, and shell.qml goes last
-  while IFS= read -r -d '' f; do
-    rel="${f#"$src"/}"
-    if [ -e "$dst/$rel" ] || [ -L "$dst/$rel" ]; then kept_files+=("$f"); else new_files+=("$f"); fi
-  done < <(find -L "$src" -type f ! -name '*.bak*' ! -name '.gitkeep' ! -name shell.qml -print0)
-  for f in "${new_files[@]}"; do put "$f" "$dst/${f#"$src"/}"; rec_sum "$dst/${f#"$src"/}"; done
-  # the changed ones are written next to their old selves first and then swapped in all at once, so a running
-  # Quickshell never reloads with half of the new files (a new Bar.qml with an old DynIsland.qml); files that
-  # did not change are not touched at all
-  local d rel2
-  local -a staged=()
-  for f in "${kept_files[@]}"; do
-    d="$dst/${f#"$src"/}"
-    if [ "$DRY_RUN" = 1 ]; then continue; fi
-    put "$f" "$d.rice-new"
-    if cmp -s "$d.rice-new" "$d"; then rm -f "$d.rice-new" "$d.rice-update"; rec_sum "$d"; continue; fi
-    if user_edited "$f" "$d"; then rm -f "$d.rice-new"; keep_edit "$f" "$d"; continue; fi
-    rel2="${d#"$HOME"/}"
-    mkdir -p "$BK/$(dirname "$rel2")"
-    cp -aL "$d" "$BK/$rel2" 2>/dev/null || warn "could not back up ~/$rel2 (it is replaced anyway)"
-    [ -L "$d" ] && rm -f "$d"
-    staged+=("$d")
-  done
-  for d in "${staged[@]}"; do mv -f "$d.rice-new" "$d"; rm -f "$d.rice-update"; rec_sum "$d"; done
-  # shell.qml last, swapped in whole as well (Quickshell must never read it half written)
-  if [ -f "$src/shell.qml" ] && [ "$DRY_RUN" != 1 ]; then
-    d="$dst/shell.qml"
-    if [ -e "$d" ]; then
-      put "$src/shell.qml" "$d.rice-new"
-      if cmp -s "$d.rice-new" "$d"; then rm -f "$d.rice-new"; rec_sum "$d"
-      elif user_edited "$src/shell.qml" "$d"; then rm -f "$d.rice-new"; keep_edit "$src/shell.qml" "$d"
-      else
-        rel2="${d#"$HOME"/}"; mkdir -p "$BK/$(dirname "$rel2")"; cp -aL "$d" "$BK/$rel2" 2>/dev/null || warn "could not back up ~/$rel2 (it is replaced anyway)"
-        [ -L "$d" ] && rm -f "$d"
-        mv -f "$d.rice-new" "$d"; rec_sum "$d"
-      fi
-    else
-      put "$src/shell.qml" "$d"; rec_sum "$d"
-    fi
-  fi
-  return 0
-}
 missing_cmds() {
   local c out=()
   for c in "${NEED_CMDS[@]}"; do command -v "$c" >/dev/null 2>&1 || out+=("$c"); done
   echo "${out[*]:-}"
 }
 # run a tool with a time limit so one stuck program can never freeze the installer
-t() { timeout "${T:-25}" "$@"; }
+# 9>&-: fd 9 is the update lock (see the top). A daemon left running with it kept the lock, so every later update
+# said "Another update is already running" with no update to find (V7.00)
+t() { timeout "${T:-25}" "$@" 9>&-; }
 # start something in the background, detached from the installer
-detach() { setsid -f "$@" >/dev/null 2>&1 </dev/null || true; }
+detach() { setsid -f "$@" >/dev/null 2>&1 </dev/null 9>&- || true; }
 # V5.06: the reboot at the end, one way after another: systemd (and with sudo when something blocks it, a program
 # holding a "do not reboot" lock or a second user logged in), elogind, then plain sudo. The terminal is there, so
 # sudo may ask for the password
@@ -296,7 +190,7 @@ sudo_keepalive() {
   [ "$DRY_RUN" = 1 ] && return 0
   info "Some steps need administrator rights (sudo)."
   sudo -v || { fail "sudo failed, skipping packages"; return 1; }
-  ( while true; do sudo -n true 2>/dev/null; sleep 50; done ) &
+  ( while true; do sudo -n true 2>/dev/null; sleep 50; done ) 9>&- &
   SUDO_PID=$!
 }
 
@@ -497,6 +391,17 @@ SESSION
   return 0
 }
 
+# the app stores next to the system's packages: Flatpak and Snap are updated nowhere else
+update_app_stores() {
+  [ "$DRY_RUN" = 1 ] && { info "would update Flatpak and Snap apps"; return 0; }
+  if command -v flatpak >/dev/null 2>&1; then
+    live "Flatpak apps" flatpak update -y || warn "Flatpak apps were not updated"
+  fi
+  if command -v snap >/dev/null 2>&1; then
+    live "Snap apps" sudo snap refresh || warn "Snap apps were not updated"
+  fi
+}
+
 step_packages() {
   case "$FAMILY" in
     arch)
@@ -511,6 +416,12 @@ step_packages() {
         warn "pacman's lock file is left behind from an update that was stopped: sudo rm /var/lib/pacman/db.lck"
       fi
       artix_repos
+      # the mirrorlist first: reflector, the 20 freshest HTTPS mirrors in countries without a name for tampered
+      # ones, sorted by speed. Without reflector (or offline) the list you have stays
+      if [ "$DRY_RUN" != 1 ] && [ -x "$ROOT/bin/rice-mirrors" ]; then
+        T=180 task "Mirrors: the fastest nearby ones (reflector)" t "$ROOT/bin/rice-mirrors" \
+          || note "reflector did not make a list: your current mirrors are kept"
+      fi
       if [ "${NO_UPGRADE:-0}" = 1 ]; then
         note "Skipping the system update (--no-upgrade): if a package then fails to download, run: sudo pacman -Syu"
       else
@@ -679,15 +590,18 @@ set_look() {
   return 0
 }
 put_wallpapers() {
-  local dir f n=0
+  local dir f n=0 cur
   dir="$(xdg-user-dir PICTURES 2>/dev/null || echo "$HOME/Pictures")/Wallpapers"
   [ "$dir" = "/Wallpapers" ] && dir="$HOME/Pictures/Wallpapers"
   mkdir -p "$dir"
+  # V6.84: the wallpaper on your screen is never touched, even when it is one we retire
+  cur="$(cat "$HOME/.cache/hyprquickpaper-current" 2>/dev/null || true)"
   # wallpapers we replaced: remove the old ones (only a file that is exactly the old picture, never yours)
   if [ -f "$ROOT/install/retired-wallpapers.txt" ]; then
     local sum name
     while read -r sum name; do
       case "$sum" in ''|'#'*) continue ;; esac
+      [ "$dir/$name" = "$cur" ] && continue
       [ -f "$dir/$name" ] && [ "$(md5sum "$dir/$name" | cut -d' ' -f1)" = "$sum" ] && rm -f "$dir/$name" && echo "removed the old wallpaper $name"
     done <"$ROOT/install/retired-wallpapers.txt"
   fi
@@ -695,8 +609,12 @@ put_wallpapers() {
     [ -f "$f" ] || continue
     [ -e "$dir/$(basename "$f")" ] || { cp "$f" "$dir/"; n=$((n + 1)); }
   done
-  # first start (or the wallpaper you had is gone): one of ours, picked at random (V5.06)
+  # V6.84: the wallpaper you picked is remembered (rice-walls / commands.sh). An update puts that one back,
+  # not a random one: only a first install, with nothing remembered, picks one of ours (V5.06)
   f="$(cat "$HOME/.cache/hyprquickpaper-current" 2>/dev/null)"
+  if [ -z "$f" ] || [ ! -f "$f" ]; then
+    f="$(head -n1 "$HOME/.config/rice/wallpaper" 2>/dev/null || true)"
+  fi
   if [ -z "$f" ] || [ ! -f "$f" ]; then
     mkdir -p "$HOME/.cache"
     local ours=() w
@@ -708,7 +626,7 @@ put_wallpapers() {
   # in a running desktop with no wallpaper yet: put it on now, with its colors (at the next login rice-walls
   # start does the same)
   if [ -n "${WAYLAND_DISPLAY:-}" ] && [ -x "$HOME/.local/bin/rice-walls" ]; then
-    setsid -f "$HOME/.local/bin/rice-walls" start >/dev/null 2>&1 </dev/null
+    setsid -f "$HOME/.local/bin/rice-walls" start >/dev/null 2>&1 </dev/null 9>&-
   fi
   echo "$n new wallpapers in $dir"
 }
@@ -853,7 +771,14 @@ step_settings() {
 }
 
 step_apps() {
-  local d n
+  local d n stopped=0
+  # V6.84: an update swaps the shell's files under a running Quickshell. It reloads on every change, so a reload
+  # between two swaps saw a mix of old and new files and crashed (and the restart loop gave up until the next
+  # session). The shell is stopped for the swap and started again here, once all of its files are in place.
+  if [ "$MODE" = update ] && [ "$DRY_RUN" != 1 ] && [ -x "$BIN/rice-desktop" ] &&
+     { [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] || [ -n "${NIRI_SOCKET:-}" ]; }; then
+    task "Stopping the desktop shell for the file swap" t "$BIN/rice-desktop" stop && stopped=1
+  fi
   n="$(find "$ROOT/bin" -maxdepth 1 -type f | wc -l)"
   task "Helper scripts ($n)  ->  ~/.local/bin" copy_bins
   [ -d "$ROOT/sounds" ] && task "Notification sounds  ->  ~/.local/share/rice/sounds" copy_tree "$ROOT/sounds" "$HOME/.local/share/rice/sounds"
@@ -871,11 +796,12 @@ step_apps() {
     task "$n  ->  ~/.config/quickshell/$d" copy_tree "$ROOT/quickshell/$d" "$HOME/.config/quickshell/$d"
   done
   # V3.38: the dashboard is gone (the bar's island took its place); its old files leave the config too
+  # V7.00: not in a dry run: it promised that nothing was changed, and these files are read by a running shell
   local old
-  for old in Dashboard DashAbout DashControl DashGrid DashHome DashPerf DashTasks DashWalls DCard DRing DSlide WallPreview; do
+  [ "$DRY_RUN" = 1 ] || for old in Dashboard DashAbout DashControl DashGrid DashHome DashPerf DashTasks DashWalls DCard DRing DSlide WallPreview; do
     rm -f "$HOME/.config/quickshell/rice-desktop/$old.qml"
   done
-  rm -f "$HOME/.config/quickshell/rice-settings/DashboardPage.qml" "$HOME/.config/quickshell/rice-settings/DashMini.qml"
+  [ "$DRY_RUN" = 1 ] || rm -f "$HOME/.config/quickshell/rice-settings/DashboardPage.qml" "$HOME/.config/quickshell/rice-settings/DashMini.qml"
   # V4.85: our own apps in the app menu (Files, Photos, Music, Videos), their icons in the wallpaper's colors
   [ "$DRY_RUN" = 1 ] || { [ -x "$BIN/rice-app" ] && task "Files, Photos, Music and Videos in the app menu" "$BIN/rice-app" install
     # our Files is the file manager (picked, or nothing picked yet): the old one leaves the app menu
@@ -883,6 +809,8 @@ step_apps() {
   if ! printf '%s' ":$PATH:" | grep -q ":$HOME/.local/bin:"; then
     warn "\$HOME/.local/bin is not in your PATH. Add it in your shell config (fish: fish_add_path \$HOME/.local/bin)"
   fi
+  [ "$stopped" = 1 ] && task "Starting the desktop shell again" t "$BIN/rice-desktop" restart
+  return 0
 }
 copy_bins() { local f; for f in "$ROOT"/bin/*; do [ -f "$f" ] && put "$f" "$BIN/$(basename "$f")"; done; return 0; }
 
@@ -915,6 +843,7 @@ write_gpu() {
   # desktop felt like 60 Hz on a 144 Hz screen)
   if [ "$nv" = 1 ] && { [ "$other" = 0 ] || [ "$nvscreen" = 1 ]; }; then
     mkdir -p "$HOME/.config/hypr"
+    bk_one "$f"      # V7.00: it is in the backup even when this run changes it in place (and can be restored)
     cat >"$f" <<'LUA'
 -- written by DarkShadow's Shell for NVIDIA graphics (install.sh)
 -- the cursor is drawn in software: with a hardware cursor it can be invisible on NVIDIA
@@ -922,9 +851,9 @@ hl.config({ cursor = { no_hardware_cursors = true } })
 LUA
     echo "NVIDIA drives the screen: software cursor"
   elif [ "$nv" = 1 ]; then
-    rm -f "$f"; echo "hybrid graphics (NVIDIA + Intel/AMD): nothing to change"
+    bk_one "$f"; rm -f "$f"; echo "hybrid graphics (NVIDIA + Intel/AMD): nothing to change"
   else
-    rm -f "$f"; echo "no NVIDIA card"
+    bk_one "$f"; rm -f "$f"; echo "no NVIDIA card"
   fi
 }
 # power modes (Performance / Balanced / Power saver in the island, the control center and Home): power-profiles-daemon.
@@ -1113,6 +1042,19 @@ step_finish() {
   fi
   # the login screen (SDDM): it follows your wallpaper; a fresh install asks whether to use it
   if [ -x "$BIN/rice-sddm" ] && [ "$DRY_RUN" != 1 ]; then
+    local sddm_st=""
+    sddm_st="$("$BIN/rice-sddm" state 2>/dev/null || true)"
+    # the theme lives in /usr/share and only its wallpaper followed your wallpaper so far: an update brought new
+    # theme files too, and they are put in (it asks for your password; when that is cancelled the old one stays)
+    # V6.90: and when SDDM is the login screen but the theme never got in (an update before the agent fix), the
+    # update puts it in too: nothing else would ever come back to it
+    local sddm_need=false
+    [[ "$sddm_st" == *'"outdated": true'* ]] && sddm_need=true
+    [[ "$sddm_st" == *'"installed": false'* && "$sddm_st" == *'"dm": "sddm"'* ]] && sddm_need=true
+    if [ "$MODE" = update ] && [ "$sddm_need" = true ]; then
+      T=300 task "Login screen (SDDM): the new theme" t "$BIN/rice-sddm" install \
+        || warn "The login screen keeps its old look (Settings > Desktop > Idle & Lockscreen > Login screen > Update it)"
+    fi
     if [ -w /usr/share/sddm/themes/darkshadow-shell/user ]; then
       task "Login screen (SDDM): your wallpaper and colors" t "$BIN/rice-sddm" sync
     elif [ "$MODE" != update ] && [ "$ASSUME_YES" != 1 ] && command -v sddm >/dev/null 2>&1 && [ ! -e /etc/NIXOS ] \
@@ -1312,7 +1254,8 @@ fi
 
 STEP_TOTAL=$(( WANT[0] + WANT[1] + WANT[2] + WANT[3] + 1 ))
 n=0
-if [ "${WANT[0]}" = 1 ]; then n=$((n + 1)); step "$n" "Packages" "Everything the desktop needs, from your package manager"; step_packages; fi
+if [ "${WANT[0]}" = 1 ]; then n=$((n + 1)); step "$n" "Packages" "Everything the desktop needs, from your package manager"; step_packages
+  [ "$MODE" = update ] && update_app_stores; fi
 if [ "${WANT[1]}" = 1 ]; then n=$((n + 1)); step "$n" "Fonts" "So text and icons look right"; step_fonts || warn "fonts skipped (run rice-fonts later)"; fi
 if [ "${WANT[2]}" = 1 ]; then n=$((n + 1)); step "$n" "Config files" "Your old files are backed up first"; step_configs; fi
 if [ "${WANT[3]}" = 1 ]; then n=$((n + 1)); step "$n" "Apps and scripts" "Settings app, desktop widgets and the commands behind them"; step_apps

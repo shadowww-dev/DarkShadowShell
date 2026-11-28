@@ -15,6 +15,7 @@ import sys
 HOME = os.path.expanduser("~")
 MODE = HOME + "/.config/rice/color-mode"
 CURRENT = HOME + "/.cache/hyprquickpaper-current"
+LIVE = HOME + "/.cache/rice/live-wallpaper"          # the video of the live wallpaper, when one plays
 APPLY = HOME + "/.config/quickshell/hyprquickpaper/commands.sh"
 
 G = "#8a8a8a"   # workspace marker on grey themes
@@ -87,6 +88,22 @@ def current():
 
 
 def reapply():
+    # V6.84: a live wallpaper keeps playing. commands.sh makes the colors from the still frame below the video,
+    # and only a plain picture changes what is on the screen (RICE_LIVE + RICE_COLORS_ONLY).
+    live = ""
+    try:
+        live = open(LIVE).read().strip()
+    except Exception:
+        pass
+    if live and os.path.isfile(live):
+        still = ""
+        r = subprocess.run([HOME + "/.local/bin/rice-walls", "still", live], capture_output=True, text=True)
+        if r.returncode == 0:
+            still = r.stdout.strip()
+        if still and os.path.isfile(still) and os.path.isfile(APPLY):
+            env = dict(os.environ, RICE_LIVE="1", RICE_COLORS_ONLY="1", RICE_CURRENT=live)
+            subprocess.run(["bash", APPLY, still], env=env)
+            return
     try:
         cur = open(CURRENT).read().strip()
     except Exception:

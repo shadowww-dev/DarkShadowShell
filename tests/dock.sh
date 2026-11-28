@@ -35,3 +35,7 @@ if ! out="$(HOME="$t/home" XDG_DATA_DIRS="$t/a:$t/b" XDG_DATA_HOME="$t/none" "$r
 fi
 out="$(printf '%s' "$out" | python3 -c 'import json, sys; print(" ".join(json.load(sys.stdin)["dock"]["apps"]))')"
 [ "$out" = "kitty steam" ] && ok "a default pin needs its .desktop file" || bad "the default pins are: $out"
+# Settings > Dock > Show pin button: off until it is turned on
+grep -q 'dc.pinButton === true' "$dock" && ok "the pin button is off until it is turned on" || bad "the pin button still shows by default"
+grep -q '"pinButton": false' "$root/settings/rice/desktop.json" && ok "the shipped settings keep the pin button off" || bad "the shipped settings show the pin button"
+grep -q '"pinButton": False' "$root/bin/desktop-set" && ok "a config made by desktop-set keeps the pin button off" || bad "desktop-set turns the pin button on"

@@ -12,8 +12,10 @@ Item {
     property int maxRows: 2
     property color sung: "white"
     property color dim: Qt.rgba(1, 1, 1, 0.36)
-    property string family: Fonts.main
-    property int weight: Font.ExtraBold
+    // the reading font (Settings > Fonts) and the weight the rest of the shell uses: ExtraBold read as someone
+    // else's type next to the cards
+    property string family: Fonts.reading
+    property int weight: Font.DemiBold
     property real lift: 18              // how far the words rise in
     property bool live: true            // the animations (off: the words just appear)
     property int align: Text.AlignHCenter
@@ -142,7 +144,7 @@ Item {
                     text: wd.modelData
                     color: ln.note ? ll.sung : ll.dim
                     opacity: ln.note ? 0.8 : 1
-                    font.family: ll.family; font.pixelSize: ln.fs; font.weight: ll.weight; font.letterSpacing: -0.2
+                    font.family: ll.family; font.pixelSize: ln.fs; font.weight: ll.weight
                 }
                 // the sung part, the same word in the bright color over it
                 Item {
@@ -151,7 +153,7 @@ Item {
                     visible: wd.f > 0
                     Text {
                         text: wd.modelData; color: ll.sung
-                        font.family: ll.family; font.pixelSize: ln.fs; font.weight: ll.weight; font.letterSpacing: -0.2
+                        font.family: ll.family; font.pixelSize: ln.fs; font.weight: ll.weight
                     }
                 }
             }

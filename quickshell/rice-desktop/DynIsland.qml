@@ -3,6 +3,8 @@ import Quickshell.Io
 import Quickshell.Wayland
 import Quickshell.Services.Pipewire
 import QtQuick
+import QtQuick.Effects
+import QtQuick.Shapes
 
 // The island of the Dynamic bar style: it sits where the clock is and grows into whatever happens right now.
 //   idle    the time (and, while music plays, the cover in your shape and a small moving wave)
@@ -30,6 +32,8 @@ Item {
     function on(k) { return dynamic && cfg[k] !== false }
 
     Instantiator { model: isl.visible && isl.big ? 1 : 0; delegate: QtObject { Component.onCompleted: Player.hold(); Component.onDestruction: Player.release() } }
+    // the words in the player: Lyrics looks them up only while they are on screen
+    LyricsUser { active: isl.big && isl.cardMode === "media" && isl.mediaLyr }
     readonly property var source: Pipewire.defaultAudioSource
     PwObjectTracker { objects: [isl.source] }
     readonly property bool micMuted: source && source.audio ? source.audio.muted : false
@@ -39,13 +43,16 @@ Item {
     // the card beside the bar: a notification, the info card (today, system) or the player
     property string flash: ""                  // volume | mic | ws (for a moment)
     property bool hoverOpen: false
+    property bool hoverToday: false            // the info card, opened by pointing at the island (nothing playing)
     property bool pinned: false                // the player, opened from the info card
     property var note: null                    // the notification it shows
     property bool infoOpen: false
     property string infoTab: "today"           // today | system
+    property bool mediaLyr: false              // the player shows the words of the song instead
+    onBigChanged: if (!big) mediaLyr = false
     readonly property string mode: flash !== "" ? flash : (bar && bar.recOn ? "rec" : "idle")
     readonly property string cardWant: note ? "notif"
-        : (infoOpen ? "info" : ((pinned || hoverOpen) && Player.has && !ghost ? "media" : ""))
+        : (infoOpen || hoverToday ? "info" : ((pinned || hoverOpen) && Player.has && !ghost ? "media" : ""))
     readonly property bool big: cardWant !== ""
     function show(what, ms) { if (flash !== what) bump.restart(); flash = what; flashT.interval = ms; flashT.restart() }
     // something new in the island: it gives a small squeeze, like a drop landing
@@ -60,7 +67,7 @@ Item {
     property bool ghost: false
     // the cards you opened (not the ones that come and go by themselves): Esc, the desktop or another window close them
     readonly property bool sticky: big && (infoOpen || pinned)
-    function closeCards() { infoOpen = false; pinned = false; hoverOpen = false }
+    function closeCards() { infoOpen = false; pinned = false; hoverOpen = false; hoverToday = false }
     // Another window taking the focus closes the opened card. Opening the card takes the keyboard, so the window
     // that had it (Settings, a browser) lets it go: that is not "another window" and must not close the card again
     // (it did: with any window open the card closed as soon as it opened).
@@ -74,8 +81,11 @@ Item {
         }
     }
     function openInfo(tab, toggle) {
-        if (toggle && infoOpen && infoTab === tab) { infoOpen = false; return }
-        infoTab = tab; pinned = false; hoverOpen = false; infoOpen = true; bump.restart()
+        // a click on the card the pointer already opened keeps it (it turns into a pinned one), instead of closing it
+        const wasHover = hoverToday
+        hoverToday = false
+        if (toggle && infoOpen && infoTab === tab && !wasHover) { infoOpen = false; return }
+        infoTab = tab; pinned = false; hoverOpen = false; infoOpen = true
         if (!hovering) pinT.restart()
     }
 
@@ -175,7 +185,32 @@ Item {
         stdout: StdioCollector { onStreamFinished: if (text.trim() !== "") isl.osName = text.trim() }
     }
     property var up: ({ installed: "", latest: "", update: false, news: [], checked: 0 })
+    property var pk: ({})            // rice-care updates: the same package state Update Center shows
     property bool checking: false
+    readonly property int pkgTotal: (isl.pk && isl.pk.updateable) || 0
+    // "Arch packages 12 · Flatpak apps 3 · AUR (paru) 5 (shown only)": one line, the same answer as Update Center
+    // a manager that is only shown (AUR, NixOS, rpm-ostree) with nothing to count keeps its own note
+    function pkgLine() {
+        const ms = (isl.pk && isl.pk.managers) || []
+        const parts = []
+        for (let i = 0; i < ms.length; i++) {
+            const m = ms[i]
+            if (m.count > 0)
+                parts.push(Tr.t(m.name) + " " + m.count + (m.manual ? " (" + Tr.t("not updated here") + ")" : ""))
+            else if (m.manual && m.note) parts.push(Tr.t(m.note))
+        }
+        return parts.join("  ·  ")
+    }
+    Process {
+        id: pkProc
+        command: ["true"]
+        stdout: StdioCollector { onStreamFinished: { try { isl.pk = JSON.parse(text) } catch (e) { isl.pk = {} } } }
+    }
+    function loadPackages() {
+        if (pkProc.running) return
+        pkProc.command = ["bash", "-c", "\"$HOME/.local/bin/rice-care\" updates 2>/dev/null"]
+        pkProc.running = true
+    }
     Process {
         id: upCache
         command: ["bash", "-c", "cat \"$HOME/.cache/rice/update.json\" 2>/dev/null"]
@@ -188,7 +223,7 @@ Item {
     }
     function checkUpdates() { if (!upProc.running) { checking = true; upProc.running = true } }
     readonly property bool aboutOpen: big && cardMode === "info" && infoTab === "about"
-    onAboutOpenChanged: if (aboutOpen) { upCache.running = true; if (Date.now() / 1000 - (up.checked || 0) > 1800) checkUpdates() }
+    onAboutOpenChanged: if (aboutOpen) { upCache.running = true; loadPackages(); if (Date.now() / 1000 - (up.checked || 0) > 1800) checkUpdates() }
     function ago(t) {
         if (!t) return "never"
         const m = Math.floor((Date.now() / 1000 - t) / 60)
@@ -229,7 +264,7 @@ Item {
     // the card: which one it shows (kept while it closes)
     property string cardMode: "media"
     onCardWantChanged: if (cardWant !== "") cardMode = cardWant
-    readonly property real cw: cardMode === "notif" ? 440 : (cardMode === "info" ? 520 : 470)
+    readonly property real cw: cardMode === "notif" ? 440 : 520
     readonly property real ch: cardMode === "notif" ? 96 : (cardMode === "info" ? 318 : 184)
     readonly property bool cardShown: card.opacity > 0.01
     readonly property Item cardItem: card          // niri: the bar blurs behind it (NiriBlur)
@@ -242,12 +277,16 @@ Item {
     // pointing at it: opens the player; cards close a moment after the pointer leaves (opened ones wait longer)
     readonly property bool hovering: hov.hovered || hovC.hovered
     HoverHandler { id: hov }
+    // V7.15: pointing at the island opens what it has: the player while a song plays, Today when nothing does (a
+    // click is not needed; V7.14 only opened the player, so with nothing playing the pointer did nothing at all)
     onHoveringChanged: {
-        if (hovering) { closeT.stop(); pinT.stop(); if (on("island_hover") && !big && !ghost) openT.restart() }
-        else { openT.stop(); closeT.restart(); if (pinned || infoOpen) pinT.restart() }
+        if (hovering) { closeT.stop(); pinT.stop()
+            if (!big && !ghost) { if (Player.has && on("island_hover")) openT.restart(); else if (dynamic && !Player.has) todayT.restart() } }
+        else { openT.stop(); todayT.stop(); closeT.restart(); if (pinned || infoOpen) pinT.restart() }
     }
     Timer { id: openT; interval: 280; onTriggered: isl.hoverOpen = Player.has }
-    Timer { id: closeT; interval: 450; onTriggered: isl.hoverOpen = false }
+    Timer { id: todayT; interval: 280; onTriggered: if (!isl.big) isl.hoverToday = true }
+    Timer { id: closeT; interval: 450; onTriggered: { isl.hoverOpen = false; isl.hoverToday = false } }
     Timer { id: pinT; interval: Math.max(2, isl.cfg.island_close || 4) * 1000; onTriggered: { isl.pinned = false; isl.infoOpen = false } }
     // the player closes by itself when nothing plays any more
     onPlayingChanged: if (!playing && !hovering) { pinT.restart(); closeT.restart() }
@@ -258,25 +297,6 @@ Item {
     // the music's colors), only at rest
     readonly property bool breathe: Vibe.island && Player.playing && !isl.ghost && !Look.lite && !isl.big && isl.pillMode === "idle"
     VibeUser { active: isl.breathe }
-    Rectangle {
-        anchors.fill: bg; anchors.margins: -2 - 3 * Vibe.level
-        radius: Look.sq ? 0 : height / 2
-        color: "transparent"
-        border.width: 1.5 + 1.5 * Vibe.level
-        border.color: isl.pal ? isl.pal.primary : Look.accentHi
-        opacity: isl.breathe ? 0.15 + 0.75 * Vibe.level : 0
-        Behavior on opacity { NumberAnimation { duration: 120 } }
-        visible: opacity > 0.01
-    }
-    Rectangle {
-        anchors.fill: bg; anchors.margins: -6 - 6 * Vibe.level
-        radius: Look.sq ? 0 : height / 2
-        color: "transparent"
-        border.width: 4
-        border.color: isl.pal ? isl.pal.primary : Look.accentHi
-        opacity: isl.breathe ? 0.18 * Vibe.level + 0.2 * Vibe.kick : 0
-        visible: opacity > 0.01
-    }
     Shadow { anchors.fill: bg; radius: Look.sq ? 0 : (bg.radius); on: Look.shadows && Look.shadowBar && !isl.flatRest && !isl.ghost; size: Look.shadowSize * 0.5; strength: Look.shadowStrength }
     Rectangle {
         id: bg
@@ -287,6 +307,27 @@ Item {
         // inside the notch or a pill with modules it has no color of its own (no darker band)
         color: isl.flatRest ? Qt.rgba(isl.fill.r, isl.fill.g, isl.fill.b, 0) : isl.fill
         clip: true
+        // V7.03: the beat's light is inside the pill. It used to be drawn around it, so the part below the island
+        // hung outside the bar as a colored fringe (the "artifact under the island" while music played)
+        Rectangle {
+            anchors.fill: parent; anchors.margins: 2
+            radius: Look.sq ? 0 : height / 2
+            color: "transparent"
+            border.width: 1.5 + 1.5 * Vibe.level
+            border.color: isl.pal ? isl.pal.primary : Look.accentHi
+            opacity: isl.breathe ? 0.15 + 0.75 * Vibe.level : 0
+            Behavior on opacity { NumberAnimation { duration: 120 } }
+            visible: opacity > 0.01
+        }
+        Rectangle {
+            anchors.fill: parent; anchors.margins: 5
+            radius: Look.sq ? 0 : height / 2
+            color: "transparent"
+            border.width: 3
+            border.color: isl.pal ? isl.pal.primary : Look.accentHi
+            opacity: isl.breathe ? 0.18 * Vibe.level + 0.2 * Vibe.kick : 0
+            visible: opacity > 0.01
+        }
         // the whole island: left click today (calendar, weather), right click system, the wheel the volume;
         // it works whatever the island shows (the recording's buttons and the volume line sit on top of it)
         MouseArea {
@@ -306,14 +347,37 @@ Item {
                 ShapeImage { visible: Player.playing; width: 22; height: 22; anchors.verticalCenter: parent.verticalCenter
                     kind: Look.shape; source: Player.art; empty: isl.pal ? isl.pal.container : "#333"; fallbackColor: isl.pal ? isl.pal.inkContainer : "#ccc"
                     SlowSpin { turn: 360; period: 9000; running: Player.playing && isl.pillMode === "idle" && !Look.lite } }
-                // the date (as the bar's Date module) and the time in a pill in your key color
-                Text { visible: isl.showDate; anchors.verticalCenter: parent.verticalCenter
-                    text: isl.bar ? Qt.locale().dayName(isl.bar.now.getDay(), Locale.ShortFormat) + ", " + isl.bar.two(isl.bar.now.getDate()) + "/" + isl.bar.two(isl.bar.now.getMonth() + 1) : ""
-                    color: isl.pal ? isl.pal.fg : "white"; font.family: Fonts.main; font.pixelSize: 13; font.weight: Font.Medium }
+                // V7.15: the day, the date and the time in one pill in your key color, the same size and the same ink,
+                // so the island reads as one thing. Before, the day was tiny capitals in the key color, the date plain
+                // bold text and only the time sat in a pill: three treatments side by side
+                // V7.15: a theme background (the island's own surface, see-through) instead of the key color, a small
+                // calendar before the day like the weather row's cloud, and one ink for all of it. V7.16: no
+                // outline (it was drawn over the island and read as a second edge), more of the island shows
+                // through, and the pill is a touch larger so the row has room to breathe
                 Rectangle { visible: isl.showDate; anchors.verticalCenter: parent.verticalCenter
-                    width: tp.implicitWidth + 18; height: isl.bh - 14; radius: Look.sq ? 0 : (height / 2); color: isl.pal ? isl.pal.primary : "#8f8"
-                    Text { id: tp; anchors.centerIn: parent; text: isl.bar ? isl.bar.timeText : ""; color: isl.pal ? isl.pal.inkPrimary : "black"
-                        font.family: Fonts.numbers; font.pixelSize: 13; font.weight: Font.DemiBold } }
+                    width: dtRow.implicitWidth + 22; height: isl.bh - 10; radius: Look.sq ? 0 : (height / 2)
+                    color: isl.pal ? Qt.rgba(isl.pal.surface.r, isl.pal.surface.g, isl.pal.surface.b, 0.34)
+                                   : Qt.rgba(0.08, 0.08, 0.08, 0.34)
+                    border.width: 0
+                    Row {
+                        id: dtRow; anchors.centerIn: parent; spacing: 6
+                        readonly property color ink: isl.pal ? isl.pal.fg : "white"
+                        MIcon { anchors.verticalCenter: parent.verticalCenter; size: 13; name: "calendar_today"; glyph: String.fromCodePoint(0xF00ED); color: dtRow.ink }
+                        Text { anchors.verticalCenter: parent.verticalCenter
+                            text: isl.bar ? Qt.locale().dayName(isl.bar.now.getDay(), Locale.ShortFormat) : ""
+                            color: dtRow.ink; font.family: Fonts.main; font.pixelSize: 12; font.weight: Font.DemiBold }
+                        Rectangle { width: 3; height: 3; radius: Look.sq ? 0 : (1.5); anchors.verticalCenter: parent.verticalCenter
+                            color: Qt.rgba(dtRow.ink.r, dtRow.ink.g, dtRow.ink.b, 0.45) }
+                        Text { anchors.verticalCenter: parent.verticalCenter
+                            text: isl.bar ? isl.bar.two(isl.bar.now.getDate()) + "/" + isl.bar.two(isl.bar.now.getMonth() + 1) : ""
+                            color: dtRow.ink; font.family: Fonts.numbers; font.pixelSize: 12; font.weight: Font.DemiBold }
+                        Rectangle { width: 1; height: 12; anchors.verticalCenter: parent.verticalCenter
+                            color: Qt.rgba(dtRow.ink.r, dtRow.ink.g, dtRow.ink.b, 0.28) }
+                        Text { anchors.verticalCenter: parent.verticalCenter
+                            text: isl.bar ? isl.bar.timeText : ""
+                            color: dtRow.ink; font.family: Fonts.numbers; font.pixelSize: 12; font.weight: Font.DemiBold }
+                    }
+                }
                 Text { visible: !isl.showDate; anchors.verticalCenter: parent.verticalCenter; text: isl.bar ? isl.bar.timeText : ""
                     color: isl.pal ? isl.pal.fg : "white"; font.family: Fonts.main; font.pixelSize: 14; font.weight: Font.DemiBold }
                 Row {
@@ -325,7 +389,6 @@ Item {
                     Text { anchors.verticalCenter: parent.verticalCenter; text: isl.wTemp.replace(/[CF]$/, ""); color: isl.pal ? isl.pal.dim : "#aaa"
                         font.family: Fonts.main; font.pixelSize: 13; font.weight: Font.Medium }
                 }
-                Eq { visible: Player.playing; anchors.verticalCenter: parent.verticalCenter; h: 14; go: isl.pillMode === "idle" }
             }
         }
 
@@ -521,6 +584,53 @@ Item {
     }
 
     // ---------- the card: the player or a notification, just beside the bar ----------
+    // V7.12 the liquid bridge. While the panel is still this close it touches the pill, so the two are one shape with
+    // no seam at all. When it lets go, a strand stretches between them and thins to nothing with a long tail, so the
+    // last frames are the thin ones and nothing pops (V7.11 took the strand from 148 px to zero in four frames, which
+    // read as a cut). Opening and closing are the same shape backwards, so both stay smooth. The card's glass
+    // hairline is hidden while this is joined, otherwise it would draw a line straight across the neck.
+    Shape {
+        id: dropNeck
+        x: card.x
+        y: isl.down ? isl.bh : card.y + card.height
+        width: Math.max(1, card.width)
+        height: Math.max(0, card.gapA)
+        // the strand is this wide at the pill, but never wider than the pill's own flat bottom (otherwise it pokes
+        // out of the round corners)
+        readonly property real tw0: Math.min(width * 0.62, isl.width * 0.78)
+        // the let-go starts with 45% of the motion left, and the width dies with a tail: 1 - p is the thinning, and
+        // pow puts the last frames at a fraction of a pixel, so the strand fades out instead of being cut off
+        readonly property real letgo: Math.max(0, Math.min(1, (card.tc - 0.55) / 0.45))
+        readonly property real tw: tw0 * Math.pow(1 - letgo, 2.2)
+        // the pill's middle, in the shape's own coordinates (the card can be off-centre when clamped to the screen)
+        readonly property real cx: Math.max(4, Math.min(width - 4, isl.width / 2 - card.x))
+        // joined while the strand is still visible at all; a sub-pixel strand counts as gone, and by then the panel
+        // already sits away from the pill, so that change cannot be seen
+        readonly property bool joined: card.tc > 0.02 && card.gapA > 0.02 && tw >= 0.15
+        visible: joined && card.opacity > 0.02 && isl.fill.a > 0.02
+        preferredRendererType: Shape.CurveRenderer
+        ShapePath {
+            fillColor: isl.fill
+            strokeColor: "transparent"
+            fillRule: ShapePath.WindingFill
+            PathSvg { path: {
+                const W = dropNeck.width, H = dropNeck.height, tw = dropNeck.tw
+                if (H < 0.02 || tw < 0.15 || W < 1) return ""
+                const cx = dropNeck.cx
+                // V7.13: the bottom is narrow too (a small flare into the panel), not the panel's whole top edge.
+                // With the full width down there the strand shrank into a long thin line that still covered the
+                // panel, so it never got smaller, it just popped away at the end. Now its area goes to zero with tw
+                const tb = Math.min(W, tw * 1.45)
+                const py = isl.down ? 0 : H
+                const cy = isl.down ? H : 0
+                const midUp = py + (cy - py) * 0.52, midDn = cy - (cy - py) * 0.42
+                return "M" + (cx - tw / 2) + " " + py +
+                  " C" + (cx - tw * 0.42) + " " + midUp + " " + (cx - tb * 0.5) + " " + midDn + " " + (cx - tb / 2) + " " + cy +
+                  " L" + (cx + tb / 2) + " " + cy +
+                  " C" + (cx + tb * 0.5) + " " + midDn + " " + (cx + tw * 0.42) + " " + midUp + " " + (cx + tw / 2) + " " + py + " Z"
+            } }
+        }
+    }
     Shadow { anchors.fill: card; radius: Look.sq ? 0 : (card.radius); on: Look.shadows && Look.shadowBar; opacity: card.opacity; size: Look.shadowSize; strength: Look.shadowStrength }
     Rectangle {
         id: card
@@ -529,39 +639,69 @@ Item {
         // (a container transform: size, place and corners morph together, with a little overshoot)
         property real t: isl.big ? 1 : 0
         onTChanged: if (t < 0.01 && !isl.big) isl.cardMode = ""
-        // slow and soft on the way in, quicker on the way out
-        Behavior on t { NumberAnimation { duration: isl.big ? (Look.lite ? 340 : 620) : 280
-            easing.type: isl.big ? Easing.OutBack : Easing.InOutCubic; easing.overshoot: Look.lite ? 0 : 0.9 } }
+        // V7.11: 520 ms, in and out. The droplet is connected to the island by the bridge above, widens into the
+        // panel while it stays connected, and the bridge pinches at the end (it lets go). InOutCubic: still start,
+        // soft landing
+        Behavior on t { NumberAnimation { duration: Look.lite ? 240 : 520
+            easing.type: Easing.InOutCubic } }
         property real cwA: isl.cw
         property real chA: isl.ch
         Behavior on cwA { SpringAnimation { spring: 2.4; damping: 0.36; epsilon: 0.4 } }
         Behavior on chA { SpringAnimation { spring: 2.4; damping: 0.36; epsilon: 0.4 } }
         readonly property real tc: Math.max(0, t)
-        width: Math.max(isl.bh, isl.width + (cwA - isl.width) * tc)
-        height: Math.max(isl.bh * 0.6, isl.bh + (chA - isl.bh) * tc)
+        // V7.11: the droplet is the card at its small size. It is connected to the island by the bridge from the
+        // first frame, widens into the panel over the first ~72% (the island pours into the panel), then the bridge
+        // pinches (the let-go in the last 14%). Content is revealed by the clip as it grows.
+        readonly property real dropW: 46
+        readonly property real dropH: 46
+        readonly property real openE: { const p = Math.max(0, Math.min(1, (tc - 0.08) / 0.64)); return p * p * (3 - 2 * p) }
+        readonly property real shown: tc < 0.02 ? 0 : 1
+        // V7.12: the panel is flush against the pill for most of the motion, so the two are one silhouette with no
+        // strand to see; only in the last third does it pull away, and that is when the strand appears
+        readonly property real gapA: { const p = Math.max(0, Math.min(1, (tc - 0.66) / 0.34)); return 12 * p * p * (3 - 2 * p) }
+        width: shown * (dropW + (cwA - dropW) * openE)
+        height: shown * (dropH + (chA - dropH) * openE)
         // centred on the island, but always on the screen
         readonly property real want: isl.partMid < 0 || width <= isl.width ? (isl.width - width) / 2
             : Math.max(isl.width - width, Math.min(0, isl.partMid - isl.x - width / 2))
-        x: Math.max(-isl.x, Math.min(isl.areaW - isl.x - width, (isl.width - width) / 2 + (want - (isl.width - width) / 2) * Math.min(1, tc)))
-        y: isl.down ? (isl.bh + 8) * Math.min(1, tc) : isl.bh - height - (isl.bh + 8) * Math.min(1, tc)
-        radius: Look.sq ? 0 : (Math.min(height / 2, isl.bh / 2 + (30 - isl.bh / 2) * Math.min(1, tc)))
+        x: Math.max(-isl.x, Math.min(isl.areaW - isl.x - width, (isl.width - width) / 2 + (want - (isl.width - width) / 2) * Math.min(1, openE)))
+        y: isl.down ? isl.bh + gapA : -height - gapA
+        radius: Look.sq ? 0 : (Math.min(height / 2, dropH / 2 + (30 - dropH / 2) * openE))
         color: isl.fill
         visible: opacity > 0.01
-        opacity: t < 0.02 ? 0 : Math.min(1, t * 4)
+        opacity: tc < 0.02 ? 0 : Math.min(1, tc * 6)
         clip: true
         HoverHandler { id: hovC }
-        // the player tints the card with your key color
+        // the glass edge and one sweep of light: a plain dark rectangle reads as a panel, not as glass
         Rectangle {
-            anchors.fill: parent; radius: Look.sq ? 0 : (parent.radius)
-            opacity: isl.cardMode === "media" ? 1 : 0
-            Behavior on opacity { NumberAnimation { duration: 300 } }
+            anchors.fill: parent; radius: parent.radius
+            color: "transparent"; border.width: 1
+            border.color: Qt.rgba(1, 1, 1, 0.16)
+            // V7.12: no hairline while the panel is one shape with the island (it drew a line straight across the
+            // join and that is what made the panel look stuck on). It fades in only once the panel is clearly away
+            visible: !Look.sq && card.opacity > 0.5 && opacity > 0.01
+            opacity: card.gapA > 8 && !dropNeck.joined ? 1 : 0
+            Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+        }
+        Rectangle {
+            id: sheen
+            width: Math.max(2, card.width * 0.6); height: card.height * 2.2
+            y: -card.height * 0.6; rotation: 16
+            visible: sheenAnim.running && !Look.lite
             gradient: Gradient {
                 orientation: Gradient.Horizontal
-                GradientStop { position: 0; color: isl.pal ? Qt.rgba(isl.pal.primary.r, isl.pal.primary.g, isl.pal.primary.b, 0.2) : "transparent" }
-                GradientStop { position: 0.7; color: "transparent" }
+                GradientStop { position: 0; color: "transparent" }
+                GradientStop { position: 0.5; color: Qt.rgba(1, 1, 1, 0.09) }
+                GradientStop { position: 1; color: "transparent" }
+            }
+            SequentialAnimation {
+                id: sheenAnim
+                running: isl.big
+                PauseAnimation { duration: 90 }
+                NumberAnimation { target: sheen; property: "x"; from: -sheen.width; to: card.width + sheen.width
+                    duration: 520; easing.type: Easing.BezierSpline; easing.bezierCurve: Look.emph }
             }
         }
-
 
         // ---------- the info card: today (calendar, weather, the day) and system (CPU, GPU, RAM, disk) ----------
         Face {
@@ -573,7 +713,10 @@ Item {
                 id: tabs
                 anchors.horizontalCenter: parent.horizontalCenter; y: isl.down ? 14 : 14
                 width: tabRow.width + 8; height: 38
-                Rectangle { anchors.fill: parent; radius: Look.sq ? 0 : (height / 2); color: fInfo.pp ? fInfo.pp.card : "#222" }
+                // V6.95: the strip used to be the solid card color, a dark band on the glass; it is the same color
+                // with the card showing through it
+                Rectangle { anchors.fill: parent; radius: Look.sq ? 0 : (height / 2)
+                    color: fInfo.pp ? Qt.rgba(fInfo.pp.card.r, fInfo.pp.card.g, fInfo.pp.card.b, 0.38) : "#222" }
                 Rectangle {
                     id: tabPill
                     readonly property var cur: isl.infoTab === "system" ? tSys : (isl.infoTab === "about" ? tAbout : tToday)
@@ -703,28 +846,32 @@ Item {
                 // updates
                 Rectangle {
                     x: 24; y: 124; width: parent.width - 48; height: 104; radius: Look.sq ? 0 : (24)
-                    color: isl.up.update ? (fInfo.pp ? fInfo.pp.container : "#333") : (fInfo.pp ? fInfo.pp.card : "#222")
+                    color: isl.up.update || isl.pkgTotal > 0 ? (fInfo.pp ? fInfo.pp.container : "#333")
+                        : (fInfo.pp ? Qt.rgba(fInfo.pp.card.r, fInfo.pp.card.g, fInfo.pp.card.b, 0.45) : "#222")
                     Behavior on color { ColorAnimation { duration: 260 } }
                     Item { id: upIc; x: 18; anchors.verticalCenter: parent.verticalCenter; width: 48; height: 48
-                        Blob { id: upBlob; anchors.fill: parent; kind: isl.up.update ? Look.shape : "circle"; color: fInfo.pp ? (isl.up.update ? fInfo.pp.primary : fInfo.pp.cardHi) : "#444"
+                        Blob { id: upBlob; anchors.fill: parent; kind: isl.up.update || isl.pkgTotal > 0 ? Look.shape : "circle"; color: fInfo.pp ? (isl.up.update || isl.pkgTotal > 0 ? fInfo.pp.primary : fInfo.pp.cardHi) : "#444"
                             RotationAnimator on rotation { from: 0; to: 360; duration: 2400; loops: Animation.Infinite; running: isl.checking && ab.visible
                                 onRunningChanged: if (running) upBlobSettle.stop(); else Qt.callLater(upBlobSettle.go) }
                             NumberAnimation { id: upBlobSettle; target: upBlob; property: "rotation"; to: 360; duration: 600; easing.type: Easing.OutCubic
                                 function go() { const r = ((upBlob.rotation % 360) + 360) % 360; upBlob.rotation = r; from = r; restart() }
                                 onFinished: upBlob.rotation = 0 } }
                         MIcon { anchors.centerIn: parent; size: 22; filled: true; glyph: ""
-                            name: isl.checking ? "sync" : (isl.up.update ? "system_update_alt" : "check_circle")
-                            color: fInfo.pp ? (isl.up.update ? fInfo.pp.inkPrimary : fInfo.pp.fg) : "white" } }
+                            name: isl.checking ? "sync" : (isl.up.update || isl.pkgTotal > 0 ? "system_update_alt" : "check_circle")
+                            color: fInfo.pp ? (isl.up.update || isl.pkgTotal > 0 ? fInfo.pp.inkPrimary : fInfo.pp.fg) : "white" } }
                     Column {
                         anchors.left: upIc.right; anchors.leftMargin: 14; anchors.right: upBtn.left; anchors.rightMargin: 10
                         anchors.verticalCenter: parent.verticalCenter; spacing: 2
                         Text { width: parent.width; elide: Text.ElideRight
-                            text: isl.checking && !isl.up.installed ? Tr.t("Looking for updates") : (isl.up.update ? Tr.t("Update V") + isl.up.latest + Tr.t(" is ready") : Tr.t("You are up to date"))
-                            color: isl.up.update ? (fInfo.pp ? fInfo.pp.inkContainer : "white") : (fInfo.pp ? fInfo.pp.fg : "white")
+                            text: isl.checking && !isl.up.installed ? Tr.t("Looking for updates") : (isl.up.update ? Tr.t("Update V") + isl.up.latest + Tr.t(" is ready") : (isl.pkgTotal > 0 ? Tr.t("Updates are ready") : Tr.t("You are up to date")))
+                            color: isl.up.update || isl.pkgTotal > 0 ? (fInfo.pp ? fInfo.pp.inkContainer : "white") : (fInfo.pp ? fInfo.pp.fg : "white")
                             font.family: Fonts.main; font.pixelSize: 15; font.weight: Font.DemiBold }
                         Text { width: parent.width; elide: Text.ElideRight; maximumLineCount: 2; wrapMode: Text.WordWrap
                             text: isl.up.update && isl.up.news && isl.up.news.length > 0 ? isl.up.news[0] : (isl.checking ? Tr.t("Asking GitHub ...") : Tr.t("Checked ") + isl.ago(isl.up.checked))
                             color: fInfo.pp ? fInfo.pp.dim : "#aaa"; font.family: Fonts.main; font.pixelSize: 12 }
+                        Text { visible: isl.pkgTotal > 0 || isl.pkgLine() !== ""; width: parent.width; elide: Text.ElideRight
+                            text: isl.pkgLine()
+                            color: fInfo.pp ? fInfo.pp.dim : "#aaa"; font.family: Fonts.main; font.pixelSize: 11 }
                         // a wave while it looks
                         WavyLine { visible: isl.checking; width: parent.width; height: 14; value: 1; handle: false; moving: true; thick: 3
                             color: fInfo.pp ? fInfo.pp.primary : "white"; track: "transparent" }
@@ -734,13 +881,16 @@ Item {
                         anchors.right: parent.right; anchors.rightMargin: 16; anchors.verticalCenter: parent.verticalCenter
                         width: ubt.implicitWidth + 36; height: 42; radius: Look.sq ? 0 : (ubm.pressed ? 14 : 21)
                         Behavior on radius { NumberAnimation { duration: 200 } }
-                        color: isl.up.update ? (fInfo.pp ? fInfo.pp.primary : "white") : (fInfo.pp ? fInfo.pp.cardHi : "#444")
-                        Text { id: ubt; anchors.centerIn: parent; text: isl.up.update ? Tr.t("Update now") : Tr.t("Check")
-                            color: isl.up.update ? (fInfo.pp ? fInfo.pp.inkPrimary : "black") : (fInfo.pp ? fInfo.pp.fg : "white")
+                        color: isl.up.update || isl.pkgTotal > 0 ? (fInfo.pp ? fInfo.pp.primary : "white") : (fInfo.pp ? fInfo.pp.cardHi : "#444")
+                        Text { id: ubt; anchors.centerIn: parent; text: isl.up.update || isl.pkgTotal > 0 ? Tr.t("Update now") : Tr.t("Check")
+                            color: isl.up.update || isl.pkgTotal > 0 ? (fInfo.pp ? fInfo.pp.inkPrimary : "black") : (fInfo.pp ? fInfo.pp.fg : "white")
                             font.family: Fonts.main; font.pixelSize: 13; font.weight: Font.DemiBold }
                         MouseArea { id: ubm; anchors.fill: parent; cursorShape: Qt.PointingHandCursor
                             onClicked: {
-                                if (isl.up.update) { isl.infoOpen = false; Quickshell.execDetached([Quickshell.env("HOME") + "/.local/bin/rice-update", "center"]) }
+                                if (isl.up.update || isl.pkgTotal > 0) { isl.infoOpen = false
+                                    // V6.99: a terminal, at once: the old background update waited for the package
+                                    // check (up to minutes) and then opened nothing, so the click looked dead
+                                    Quickshell.execDetached([Quickshell.env("HOME") + "/.local/bin/rice-update", "update", "--terminal"]) }
                                 else isl.checkUpdates()
                             } }
                     }
@@ -818,46 +968,153 @@ Item {
         // ---------- the player ----------
         Face {
             name: "media"; inCard: true; width: 470; height: 184
-            ShapeImage {
-                x: 16; y: 16; width: 78; height: 78
-                kind: Look.shape; source: Player.art
-                empty: isl.pal ? isl.pal.container : "#333"; fallbackColor: isl.pal ? isl.pal.inkContainer : "#ccc"
-            }
-            Column {
-                x: 110; y: 18; width: parent.width - 110 - 70; spacing: 3
-                Text { text: (Player.p && Player.p.identity ? Player.p.identity : Tr.t("Music")).toUpperCase(); color: isl.pal ? isl.pal.primary : "#aaa"
-                    font.family: Fonts.main; font.pixelSize: 10; font.weight: Font.Bold; font.letterSpacing: 1.2 }
-                Text { width: parent.width; elide: Text.ElideRight; text: Player.title; color: isl.pal ? isl.pal.fg : "white"
-                    font.family: Fonts.main; font.pixelSize: 17; font.weight: Font.DemiBold }
-                Text { width: parent.width; elide: Text.ElideRight; text: Player.artist; color: isl.pal ? isl.pal.dim : "#aaa"; font.family: Fonts.main; font.pixelSize: 13 }
-            }
-            // a wave that moves while it plays
-            Eq { x: parent.width - 58; y: 22; h: 22; bars: 5; go: isl.big && Player.playing && isl.cardMode === "media" }
-            Text { x: 16; y: 110; width: 38; text: Player.clock(Player.pos); color: isl.pal ? isl.pal.dim : "#aaa"; font.family: Fonts.numbers; font.pixelSize: 11 }
-            WavyLine {
-                x: 56; y: 105; width: parent.width - 112; height: 22
-                value: Player.frac; moving: Player.playing; seekable: true
-                color: isl.pal ? isl.pal.primary : "white"; track: isl.pal ? isl.pal.track : "#444"
-                onMoved: function(v) { Player.seekTo(v) }
-            }
-            Text { x: parent.width - 52; y: 110; width: 38; horizontalAlignment: Text.AlignRight
-                text: Player.length > 0 ? "-" + Player.clock(Player.length - Player.pos) : ""; color: isl.pal ? isl.pal.dim : "#aaa"; font.family: Fonts.numbers; font.pixelSize: 11 }
-            Row {
-                anchors.horizontalCenter: parent.horizontalCenter; y: 134
-                spacing: 22
-                Btn { icon: "skip_previous"; onHit: Player.prev() }
-                // play / pause: your shape while it plays, a circle while it waits; pressing squeezes it
-                Item {
-                    width: 40; height: 40; anchors.verticalCenter: parent.verticalCenter
-                    Blob { anchors.fill: parent; kind: Player.playing ? Look.shape : "circle"; color: isl.pal ? isl.pal.primary : "white"
-                        scale: pm.pressed ? 0.86 : (pm.containsMouse ? 1.06 : 1)
-                        Behavior on scale { NumberAnimation { duration: 220; easing.type: Easing.OutBack } }
-                        SlowSpin { turn: 360; period: 12000; running: Player.playing && isl.big && isl.cardMode === "media" && !Look.lite } }
-                    MIcon { anchors.centerIn: parent; size: 20; filled: true; name: Player.playing ? "pause" : "play_arrow"; glyph: ""
-                        color: isl.pal ? isl.pal.inkPrimary : "black" }
-                    MouseArea { id: pm; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: Player.toggle() }
+            // the player; the words take its place
+            Item {
+                id: mediaBody
+                anchors.fill: parent
+                // V7.15: the words and the player cross-fade into each other (a small slide too) instead of being
+                // swapped in one frame, so pressing the chip does not make the card jump
+                visible: opacity > 0.01
+                enabled: !isl.mediaLyr
+                opacity: isl.mediaLyr ? 0 : 1
+                Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+                transform: Translate { x: isl.mediaLyr ? -18 : 0; Behavior on x { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } } }
+                ShapeImage {
+                    x: 16; y: 16; width: 78; height: 78
+                    kind: Look.shape; source: Player.art
+                    empty: isl.pal ? isl.pal.container : "#333"; fallbackColor: isl.pal ? isl.pal.inkContainer : "#ccc"
                 }
-                Btn { icon: "skip_next"; onHit: Player.next() }
+                Column {
+                    x: 110; y: 18; width: parent.width - 110 - 130; spacing: 3
+                    Text { text: (Player.p && Player.p.identity ? Player.p.identity : Tr.t("Music")).toUpperCase(); color: isl.pal ? isl.pal.primary : "#aaa"
+                        font.family: Fonts.main; font.pixelSize: 10; font.weight: Font.Bold; font.letterSpacing: 1.2 }
+                    Text { width: parent.width; elide: Text.ElideRight; text: Player.title; color: isl.pal ? isl.pal.fg : "white"
+                        font.family: Fonts.main; font.pixelSize: 17; font.weight: Font.DemiBold }
+                    Text { width: parent.width; elide: Text.ElideRight; text: Player.artist; color: isl.pal ? isl.pal.dim : "#aaa"; font.family: Fonts.main; font.pixelSize: 13 }
+                }
+                Text { x: 16; y: 110; width: 38; text: Player.clock(Player.pos); color: isl.pal ? isl.pal.dim : "#aaa"; font.family: Fonts.numbers; font.pixelSize: 11 }
+                WavyLine {
+                    x: 56; y: 105; width: parent.width - 112; height: 22
+                    value: Player.frac; moving: Player.playing; seekable: true
+                    color: isl.pal ? isl.pal.primary : "white"; track: isl.pal ? isl.pal.track : "#444"
+                    onMoved: function(v) { Player.seekTo(v) }
+                }
+                Text { x: parent.width - 52; y: 110; width: 38; horizontalAlignment: Text.AlignRight
+                    text: Player.length > 0 ? "-" + Player.clock(Player.length - Player.pos) : ""; color: isl.pal ? isl.pal.dim : "#aaa"; font.family: Fonts.numbers; font.pixelSize: 11 }
+                Row {
+                    anchors.horizontalCenter: parent.horizontalCenter; y: 134
+                    spacing: 22
+                    Btn { icon: "skip_previous"; onHit: Player.prev() }
+                    // play / pause: your shape while it plays, a circle while it waits; pressing squeezes it
+                    Item {
+                        width: 40; height: 40; anchors.verticalCenter: parent.verticalCenter
+                        Blob { anchors.fill: parent; kind: Player.playing ? Look.shape : "circle"; color: isl.pal ? isl.pal.primary : "white"
+                            scale: pm.pressed ? 0.86 : (pm.containsMouse ? 1.06 : 1)
+                            Behavior on scale { NumberAnimation { duration: 220; easing.type: Easing.OutBack } }
+                            SlowSpin { turn: 360; period: 12000; running: Player.playing && isl.big && isl.cardMode === "media" && !Look.lite } }
+                        MIcon { anchors.centerIn: parent; size: 20; filled: true; name: Player.playing ? "pause" : "play_arrow"; glyph: ""
+                            color: isl.pal ? isl.pal.inkPrimary : "black" }
+                        MouseArea { id: pm; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: Player.toggle() }
+                    }
+                    Btn { icon: "skip_next"; onHit: Player.next() }
+                }
+            }
+            // the words of the song, in place of the player: the cover in your shape top left, the words with a
+            // soft glow, and a volume line you can drag (V6.99)
+            Item {
+                id: mediaWords
+                anchors.fill: parent
+                visible: opacity > 0.01
+                enabled: isl.mediaLyr
+                opacity: isl.mediaLyr ? 1 : 0
+                Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+                transform: Translate { x: isl.mediaLyr ? 0 : 18; Behavior on x { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } } }
+                ShapeImage {
+                    x: 16; y: 14; width: 56; height: 56
+                    kind: Look.shape; source: Player.art
+                    empty: isl.pal ? isl.pal.container : "#333"; fallbackColor: isl.pal ? isl.pal.inkContainer : "#ccc"
+                }
+                Column {
+                    x: 84; y: 14; width: parent.width - 84 - 130; spacing: 2
+                    Text { width: parent.width; elide: Text.ElideRight; text: Player.title; color: isl.pal ? isl.pal.fg : "white"
+                        font.family: Fonts.main; font.pixelSize: 14; font.weight: Font.DemiBold }
+                    Text { width: parent.width; elide: Text.ElideRight; text: Player.artist; color: isl.pal ? isl.pal.dim : "#aaa"
+                        font.family: Fonts.main; font.pixelSize: 11 }
+                }
+                Item {
+                    x: 18; y: 76; width: parent.width - 36; height: 60
+                    LyricLine {
+                        anchors.fill: parent; anchors.leftMargin: 4; anchors.rightMargin: 4
+                        visible: Player.has && Lyrics.lines.length > 0
+                        size: 19; minSize: 12; maxRows: 2
+                        sung: isl.pal ? isl.pal.primary : "white"
+                        dim: isl.pal ? Qt.rgba(isl.pal.fg.r, isl.pal.fg.g, isl.pal.fg.b, 0.34) : Qt.rgba(1, 1, 1, 0.34)
+                        live: isl.big && isl.cardMode === "media" && isl.mediaLyr && !Look.lite
+                        // a soft light around the words, so they sit on the glass instead of reading flat
+                        layer.enabled: visible && !Look.lite
+                        layer.effect: MultiEffect { shadowEnabled: true; shadowBlur: 1
+                            shadowColor: isl.pal ? Qt.rgba(isl.pal.primary.r, isl.pal.primary.g, isl.pal.primary.b, 0.55) : Qt.rgba(1, 1, 1, 0.4)
+                            shadowVerticalOffset: 0; shadowHorizontalOffset: 0 }
+                    }
+                    Flickable {
+                        anchors.fill: parent
+                        visible: Player.has && Lyrics.lines.length === 0 && Lyrics.plain !== ""
+                        contentHeight: ltx.implicitHeight; contentY: Math.max(0, (ltx.implicitHeight - height) * Player.frac)
+                        interactive: false
+                        Text { id: ltx; width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap
+                            text: Lyrics.plain; color: isl.pal ? isl.pal.dim : "#aaa"; font.family: Fonts.main; font.pixelSize: 11; lineHeight: 1.25 }
+                    }
+                    Text {
+                        anchors.centerIn: parent; width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap
+                        visible: Lyrics.lines.length === 0 && Lyrics.plain === ""
+                        text: !Player.has ? Tr.t("Nothing playing")
+                            : (Lyrics.loading ? Tr.t("Looking for the lyrics...")
+                            : (Lyrics.lyOff ? Tr.t("Lyrics are off: Settings > Language & region") : Tr.t("No lyrics for this song")))
+                        color: isl.pal ? isl.pal.dim : "#aaa"; font.family: Fonts.main; font.pixelSize: 12
+                    }
+                }
+                // the play button at the left, beside the volume line: the middle of the words is for the words
+                Item {
+                    x: 16; y: parent.height - 42; width: 30; height: 30
+                    Blob { anchors.fill: parent; kind: Player.playing ? Look.shape : "circle"; color: isl.pal ? isl.pal.primary : "white" }
+                    MIcon { anchors.centerIn: parent; size: 17; filled: true; name: Player.playing ? "pause" : "play_arrow"; glyph: ""
+                        color: isl.pal ? isl.pal.inkPrimary : "black" }
+                    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: Player.toggle() }
+                }
+                MIcon { x: 54; y: parent.height - 37; size: 15; filled: true
+                    name: isl.muted ? "volume_off" : (isl.vol < 0.5 ? "volume_down" : "volume_up"); glyph: ""
+                    color: isl.pal ? isl.pal.dim : "#aaa" }
+                WavyLine {
+                    x: 76; y: parent.height - 38; width: parent.width - 76 - 46; height: 18
+                    value: isl.muted ? 0 : Math.min(1, isl.vol); moving: Player.playing && !isl.muted; seekable: true
+                    color: isl.pal ? isl.pal.primary : "white"; track: isl.pal ? isl.pal.track : "#444"
+                    onMoved: function(v) { if (isl.bar) Vol.set(isl.bar.sink, v) }
+                }
+                Text { x: parent.width - 40; y: parent.height - 37; width: 26; horizontalAlignment: Text.AlignRight
+                    text: isl.muted ? "0" : Math.round(isl.vol * 100); color: isl.pal ? isl.pal.dim : "#aaa"
+                    font.family: Fonts.numbers; font.pixelSize: 11 }
+            }
+            // back to the info card (Today, System, About) without closing the island first
+            Item {
+                x: parent.width - 38; y: 8; width: 28; height: 28
+                Rectangle { anchors.fill: parent; radius: Look.sq ? 0 : (14); color: backM.containsMouse ? (isl.pal ? isl.pal.cardHi : "#444") : "transparent"
+                    Behavior on color { ColorAnimation { duration: 140 } } }
+                MIcon { anchors.centerIn: parent; size: 16; name: "keyboard_arrow_left"; glyph: ""; color: isl.pal ? isl.pal.dim : "#aaa" }
+                MouseArea { id: backM; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                    onClicked: { isl.mediaLyr = false; isl.pinned = false; isl.infoOpen = true; if (!isl.hovering) pinT.restart() } }
+            }
+            // the words, or the player again
+            // V7.15: in the card's top row beside the back arrow, where a chip belongs; it used to float at 40 px,
+            // over the player's wave and the cover, and read as a label stuck on the song
+            Rectangle {
+                x: parent.width - 122; y: 8; width: 82; height: 28; radius: Look.sq ? 0 : (14)
+                color: isl.mediaLyr ? (isl.pal ? Qt.rgba(isl.pal.primary.r, isl.pal.primary.g, isl.pal.primary.b, 0.22) : "#333")
+                                    : (isl.pal ? Qt.rgba(isl.pal.fg.r, isl.pal.fg.g, isl.pal.fg.b, 0.07) : "#333")
+                Behavior on color { ColorAnimation { duration: 160 } }
+                Text { anchors.centerIn: parent; text: isl.mediaLyr ? Tr.t("Player") : Tr.t("Lyrics")
+                    color: isl.mediaLyr ? (isl.pal ? isl.pal.primary : "white") : (isl.pal ? isl.pal.dim : "#aaa")
+                    font.family: Fonts.main; font.pixelSize: 11; font.weight: Font.DemiBold }
+                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: isl.mediaLyr = !isl.mediaLyr }
             }
             MouseArea { x: parent.width - 40; y: parent.height - 40; width: 30; height: 30; cursorShape: Qt.PointingHandCursor
                 visible: isl.pinned; onClicked: isl.pinned = false
@@ -873,41 +1130,19 @@ Item {
         readonly property bool act: inCard ? (isl.big && isl.cardMode === name) : isl.faceNow === name
         x: Math.round((parent.width - width) / 2)
         y: isl.down ? 0 : Math.round(parent.height - height)
-        // it comes in once the shape has (nearly) grown to it, so it is never seen cut
-        opacity: act && parent.width >= width * 0.82 && parent.height >= height * 0.82 ? 1 : 0
+        // it comes in once the shape has (nearly) grown to it, so it is never seen cut. V7.07: in the card the clip
+        // reveals it as the card unrolls (height grows), so it is opaque and gets drawn out from the top, not faded
+        opacity: inCard ? (act ? card.openE : 0)
+            : (act && parent.width >= width * 0.82 && parent.height >= height * 0.82 ? 1 : 0)
         scale: act ? 1 : 0.94
         visible: opacity > 0.01
         enabled: act
-        // the old face leaves first, then the new one comes in (they never show on top of each other)
-        Behavior on opacity { SequentialAnimation {
+        // the old face leaves first, then the new one comes in (they never show on top of each other); the card's
+        // face follows the drop instead, so no extra animation on the same property
+        Behavior on opacity { enabled: !inCard; SequentialAnimation {
             PauseAnimation { duration: fc.act ? 20 : 0 }
             NumberAnimation { target: fc; property: "opacity"; duration: fc.act ? 170 : 60; easing.type: Easing.Linear } } }
         Behavior on scale { NumberAnimation { duration: 300; easing.type: Easing.BezierSpline; easing.bezierCurve: Look.decel } }
-    }
-    // a small equalizer: round bars in your key color that bounce while music plays
-    component Eq: Row {
-        id: eq
-        property int bars: 4
-        property real h: 14
-        property bool go: true
-        spacing: 2.5
-        Repeater {
-            model: eq.bars
-            delegate: Rectangle {
-                id: bb
-                width: 3.5; radius: Look.sq ? 0 : (2); anchors.verticalCenter: parent.verticalCenter
-                color: isl.pal ? isl.pal.primary : "white"
-                property real lv: 0.4
-                height: Math.max(4, eq.h * lv)
-                SequentialAnimation on lv {
-                    running: eq.go && eq.visible && !Look.lite; loops: Animation.Infinite
-                    NumberAnimation { to: 1.0; duration: 260 + index * 70; easing.type: Easing.InOutSine }
-                    NumberAnimation { to: 0.3 + (index % 2) * 0.15; duration: 300 + index * 50; easing.type: Easing.InOutSine }
-                    NumberAnimation { to: 0.75; duration: 220 + index * 90; easing.type: Easing.InOutSine }
-                    NumberAnimation { to: 0.35; duration: 280 + index * 40; easing.type: Easing.InOutSine }
-                }
-            }
-        }
     }
     component Tab: Item {
         id: tb

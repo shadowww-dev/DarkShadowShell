@@ -27,7 +27,11 @@ PanelWindow {
     // one rice-services and one rice-weather for every bar (BarSvc.qml): a copy for another screen only reads them
     onOnChanged: if (!bar.extra) BarSvc.shown = bar.on || bar.ghostOnly
     onGhostOnlyChanged: if (!bar.extra) BarSvc.shown = bar.on || bar.ghostOnly
-    Component.onCompleted: if (!bar.extra) BarSvc.shown = bar.on || bar.ghostOnly
+    Component.onCompleted: if (!bar.extra) { BarSvc.shown = bar.on || bar.ghostOnly; BarSvc.barAlpha = alpha
+        BarSvc.barInset = bar.gap; BarSvc.barH = bar.barH }
+    onAlphaChanged: if (!bar.extra) BarSvc.barAlpha = alpha
+    onGapChanged: if (!bar.extra) BarSvc.barInset = bar.gap
+    onBarHChanged: if (!bar.extra) BarSvc.barH = bar.barH
 
     // ---------- settings (~/.config/rice/bar.json) ----------
     property var bc: ({})
@@ -187,8 +191,10 @@ PanelWindow {
     visible: on || ghostOnly || barK > 0.01
     color: "transparent"
     anchors { top: !atBottom; bottom: atBottom; left: true; right: true }
-    // room below for the recording island; windows only keep away from the bar itself
-    implicitHeight: barH + gap * 2 + 460      // room for the island's cards (the bar lets the pointer through there)
+    // V6.92: one size from the first frame. Growing the layer surface when a card opened resized it under the bar,
+    // and every part (left, middle, right) jumped a frame before the card's own animation. The mask still keeps the
+    // pointer off everything but the bar and the open card
+    implicitHeight: screen ? screen.height : barH + gap * 2 + 460
     // V6.80: with the frame the bar takes the whole edge, ignoring the room the frame keeps at the sides (its
     // strips were placed first, so the bar was 8 px short at both ends and the wallpaper showed in its corners);
     // the frame keeps the bar's room for it instead (ScreenFrame.qml).
@@ -198,15 +204,16 @@ PanelWindow {
     exclusionMode: hideOn || !on || framed ? ExclusionMode.Ignore : ExclusionMode.Normal
     exclusiveZone: framed && !hideOn && on ? -1 : (hideOn || !on ? 0 : barH + gap * 2)
     // only the bar (and the recording island) take the pointer; auto-hide: only a thin strip at the edge
-    mask: Region { item: !bar.on ? hitNone : (bar.shownBar ? hitBar : hitStrip); Region { item: hitRec } Region { item: hitIsl } Region { item: hitMenu } Region { item: hitPop } }
+    mask: Region { item: bar.sticky ? hitAll : (!bar.on ? hitNone : (bar.shownBar ? hitBar : hitStrip))
+        Region { item: hitRec } Region { item: hitIsl } Region { item: hitMenu } Region { item: hitPop } }
     Item { id: hitMenu; x: bar.gap + trayMenu.x; y: body.y + trayMenu.y; width: trayMenu.visible ? trayMenu.width : 0; height: trayMenu.height }
     Item { id: hitPop; x: bar.gap + barPop.x; y: body.y + barPop.y; width: barPop.visible ? barPop.width : 0; height: barPop.height }
-    // a card of the island or the tray menu is open: Esc, a click on the desktop (shell.qml) or another window closes it
-    readonly property bool sticky: isl.sticky || trayMenu.open || barPop.open
+    // a card of the island or the tray menu is open: a click outside it (shell.qml) or the same icon closes it.
+    // V6.85: the bar never takes the keyboard. It used to grab it while a card was open, so every key went to the
+    // bar's Esc handler and nothing could be typed until the card was noticed and closed
+    readonly property bool sticky: (isl && isl.sticky) || (trayMenu && trayMenu.open) || (barPop && barPop.open)
     function closeCards() { isl.closeCards(); trayMenu.close(); barPop.close() }
-    onStickyChanged: if (sticky) keyCatch.forceActiveFocus()
-    Item { id: keyCatch; focus: true; Keys.onEscapePressed: bar.closeCards() }
-    WlrLayershell.keyboardFocus: sticky ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
     // the island when it has grown out of the bar
     Item { id: hitIsl; x: bar.gap + isl.x + isl.ux; y: body.y + isl.y + isl.uy; width: isl.visible && bar.shownBar ? isl.uw : 0; height: isl.uh }
     Item { id: hitBar; width: parent.width; height: bar.barH + bar.gap * 2; y: bar.atBottom ? parent.height - height : 0 }
@@ -214,6 +221,10 @@ PanelWindow {
     Item { id: hitAll; anchors.fill: parent }
     Item { id: hitNone; width: 0; height: 0 }
     Item { id: hitStrip; width: parent.width; height: 3; y: bar.atBottom ? parent.height - 3 : 0 }
+    // a card is open: a click anywhere else (an app's window too) closes it, and is spent here so it does not
+    // reach that window as well
+    MouseArea { anchors.fill: parent; enabled: bar.sticky; acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
+        onClicked: bar.closeCards() }
     // niri: blur behind the bar's backgrounds, the island, its card and the tray menu (Hyprland: a layer rule).
     // These follow the island and its card in window coordinates, so the blur moves with them.
     Item { id: blurIsl; x: bar.gap + isl.x; y: body.y + isl.y; width: isl.ghost || !isl.visible ? 0 : isl.width; height: isl.height }
@@ -424,12 +435,16 @@ PanelWindow {
             readonly property bool shown: title !== ""
             // Settings > DarkShadow bar > App icon by the title: left, right (default) or off
             readonly property string side: bar.bc.title_icon === "left" || bar.bc.title_icon === "off" ? bar.bc.title_icon : "right"
+            // V7.16: a long title stayed as wide as a fifth of the bar and reached the island in the middle; it is
+            // cut at 40 characters and the module at 220 px, so it never gets close (the rest is elided)
+            readonly property string shortTitle: title.length > 40 ? title.slice(0, 39) + "\u2026" : title
+            readonly property real maxW: Math.min(220, Math.max(120, bar.width * 0.16))
             height: bar.barH
-            width: Math.min(tTxt.implicitWidth, Math.max(120, bar.width * 0.2)) + (ic.visible ? 24 : 0)
+            width: Math.min(tTxt.implicitWidth, maxW) + (ic.visible ? 24 : 0)
             Text { id: tTxt; anchors.verticalCenter: parent.verticalCenter
                 x: ic.visible && tt.side === "left" ? 24 : 0
-                width: Math.min(implicitWidth, Math.max(120, bar.width * 0.2)); elide: Text.ElideRight
-                text: tt.title; color: bar.dim; font.family: Fonts.main; font.pixelSize: 12 }
+                width: Math.min(implicitWidth, tt.maxW); elide: Text.ElideRight
+                text: tt.shortTitle; color: bar.dim; font.family: Fonts.main; font.pixelSize: 12 }
             Image { id: ic; visible: tt.appIcon !== "" && tt.side !== "off" && status === Image.Ready
                 anchors.verticalCenter: parent.verticalCenter
                 x: tt.side === "left" ? 0 : tTxt.width + 8; width: 16; height: 16
@@ -503,13 +518,13 @@ PanelWindow {
 
     Component { id: mVolume
         Item { property bool shown: true; width: 24; height: bar.barH
-            MIcon { anchors.centerIn: parent; size: 22; color: bar.muted ? bar.dim : bar.fg
+            MIcon { anchors.centerIn: parent; size: 18; color: bar.muted ? bar.dim : bar.fg
                 name: bar.muted ? "volume_off" : (bar.vol < 0.34 ? "volume_mute" : (bar.vol < 0.67 ? "volume_down" : "volume_up"))
                 glyph: String.fromCodePoint(bar.muted ? 0xF0581 : (bar.vol < 0.34 ? 0xF057F : (bar.vol < 0.67 ? 0xF0580 : 0xF057E))) }
             MouseArea { id: vm; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; acceptedButtons: Qt.LeftButton | Qt.RightButton
                 onClicked: function(m) {
                     // left: the sound menu, right: mute
-                    if (m.button === Qt.LeftButton) { const p = mapToItem(null, width / 2, 0); bar.run("\"$HOME/.local/bin/rice-volume\" menu " + Math.round(p.x)); return }
+                    if (m.button === Qt.LeftButton) { barPop.close(); const p = mapToItem(null, width / 2, 0); bar.run("\"$HOME/.local/bin/rice-volume\" menu " + Math.round(p.x)); return }
                     if (bar.sink && bar.sink.audio) bar.sink.audio.muted = !bar.sink.audio.muted
                 }
                 onWheel: function(e) { Vol.nudge(bar.sink, Look.notches(e) * 0.04) } }
@@ -524,6 +539,7 @@ PanelWindow {
                 glyph: String.fromCodePoint(bar.svc.network ? 0xF05A9 : 0xF05AA) }
             MouseArea { id: nm; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; acceptedButtons: Qt.LeftButton | Qt.RightButton
                 onClicked: function(m) {
+                    barPop.close()
                     const p = mapToItem(null, width / 2, 0)
                     bar.run("\"$HOME/.local/bin/rice-wifi\" " + Math.round(p.x))
                 } }
@@ -538,6 +554,7 @@ PanelWindow {
                 glyph: String.fromCodePoint(bar.svc.bluetooth ? 0xF00AF : 0xF00B2) }
             MouseArea { id: bm; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; acceptedButtons: Qt.LeftButton | Qt.RightButton
                 onClicked: function(m) {
+                    barPop.close()
                     const p = mapToItem(null, width / 2, 0)
                     bar.run("\"$HOME/.local/bin/rice-bluetooth\" " + Math.round(p.x))
                 } }
@@ -548,7 +565,7 @@ PanelWindow {
     Component { id: mBattery
         Item { readonly property bool shown: bar.hasBatt; width: bt.implicitWidth + 4; height: bar.barH
             Row { id: bt; anchors.centerIn: parent; spacing: 5
-                MIcon { size: 16; anchors.verticalCenter: parent.verticalCenter
+                MIcon { size: 18; anchors.verticalCenter: parent.verticalCenter
                     color: !bar.charging && bar.battPct <= 15 ? "#ff6b6b" : bar.fg
                     name: bar.charging ? "battery_charging_full" : "battery_full"
                     glyph: String.fromCodePoint(bar.charging ? 0xF0084 : 0xF0079) }
@@ -734,15 +751,15 @@ PanelWindow {
                 readonly property bool playing: bar.player !== null
                 // nothing plays: just the note, as narrow as the other icons; a song: a pill with the bars
                 width: playing ? 46 : 24; height: bar.barH - 12; radius: Look.sq ? 0 : (height / 2)
-                Behavior on width { NumberAnimation { duration: 320; easing.type: Easing.OutBack } }
+                // V7.16: this was the only module that grew with an OutBack bounce and shrank on press; it uses the
+                // same calm state layer as the others now (the pill's width only follows whether a song plays)
+                Behavior on width { NumberAnimation { duration: 320; easing.type: Easing.OutCubic } }
                 color: playing ? (bar.goo ? gp.primary : Qt.rgba(1, 1, 1, mum.containsMouse ? 0.16 : 0.08))
                                : (mum.containsMouse ? Qt.rgba(1, 1, 1, 0.1) : "transparent")
                 Behavior on color { ColorAnimation { duration: 200 } }
-                scale: mum.pressed ? 0.92 : (mum.containsMouse ? 1.05 : 1)
-                Behavior on scale { NumberAnimation { duration: 160; easing.type: Easing.OutBack } }
                 readonly property color ic: bar.goo && playing ? gp.inkPrimary : bar.fg
                 Row { anchors.centerIn: parent; spacing: 3
-                    MIcon { anchors.verticalCenter: parent.verticalCenter; size: 16; name: "music_note"; glyph: String.fromCodePoint(0xF075A); color: mu.ic }
+                    MIcon { anchors.verticalCenter: parent.verticalCenter; size: 18; name: "music_note"; glyph: String.fromCodePoint(0xF075A); color: mu.ic }
                     Row { visible: mu.playing; anchors.verticalCenter: parent.verticalCenter; spacing: 2; height: 12
                         Repeater { model: 3
                             Rectangle { width: 3; radius: Look.sq ? 0 : (1.5); anchors.bottom: parent.bottom; color: mu.ic
@@ -762,6 +779,7 @@ PanelWindow {
                 Behavior on color { ColorAnimation { duration: 150 } } }
             MouseArea { id: pm; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; acceptedButtons: Qt.LeftButton | Qt.RightButton
                 onClicked: function(m) {
+                    barPop.close()
                     const p = mapToItem(null, width / 2, 0)
                     bar.run("\"$HOME/.local/bin/rice-power\" " + Math.round(p.x))
                 } }

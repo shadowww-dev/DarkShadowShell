@@ -448,6 +448,16 @@ def off_note():
     notify("Wallpapers are off", "The shell does not set wallpapers (Settings > Wallpaper > Wallpapers from the shell).")
 
 
+def cmd_still(f):
+    """prints the still frame of a live wallpaper (for a color change that keeps it playing)"""
+    f = os.path.abspath(os.path.expanduser(f))
+    st = LIVE_DIR + "/" + key(f) + ".jpg"
+    if os.path.isfile(st):
+        print(st)
+        return 0
+    return 1
+
+
 def cmd_set(f):
     if not managed():
         off_note()
@@ -456,6 +466,12 @@ def cmd_set(f):
     if not os.path.isfile(f):
         sys.exit("rice-walls: not a file: " + f)
     os.makedirs(CACHE, exist_ok=True)
+    # V6.84: remembered for the next update (put_wallpapers never picks a random one over yours)
+    try:
+        os.makedirs(HOME + "/.config/rice", exist_ok=True)
+        open(HOME + "/.config/rice/wallpaper", "w").write(f + "\n")
+    except Exception:
+        pass
     stop_scene()
     if is_video(f):
         if not shutil.which("mpvpaper"):
@@ -731,6 +747,8 @@ def main(a):
         state()
     elif cmd == "set" and arg:
         cmd_set(arg)
+    elif cmd == "still" and arg:
+        sys.exit(cmd_still(arg))
     elif cmd == "colors" and arg:
         # Waypaper set this wallpaper itself: only the colors (and what the shell remembers)
         p = os.path.abspath(os.path.expanduser(arg))

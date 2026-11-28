@@ -59,7 +59,7 @@
     "hover": true,
     "pinnedStartup": false,
     "media": true,
-    "pinButton": true,
+    "pinButton": false,
     "appsButton": true,
     "tint": false,
     "opacity": 0.78,

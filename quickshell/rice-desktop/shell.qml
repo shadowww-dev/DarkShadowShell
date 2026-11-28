@@ -353,7 +353,9 @@ ShellRoot {
     // ---- auto-hide (Settings > Desktop): widgets fade out while windows are open on this screen
     readonly property bool autoHide: cfg.autoHide === true || Look.lite
     property bool busy: false
-    readonly property bool hideWidgets: autoHide && busy && !editing && !locked
+    // on the Infinite Desktop's canvas the windows float, so they leave the widgets alone (the tiled-window rule
+    // the setting describes); otherwise one window a screen away hid every widget there
+    readonly property bool hideWidgets: autoHide && busy && !editing && !locked && !Infinite.here
     Binding { target: Look; property: "covered"; value: root.busy && !root.editing && !root.locked }
     Process {
         id: busyProc
